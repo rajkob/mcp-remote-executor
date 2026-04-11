@@ -1,0 +1,17 @@
+services:
+  remote-executor:
+    build: .
+    image: mcp-remote-executor:latest
+    # network_mode: host — container shares the host network stack,
+    # including VPN routes, so private subnets (10.24.x.x) are reachable.
+    # Connect clients to: http://localhost:8765/sse
+    network_mode: host
+    volumes:
+      - ./data:/app/data
+    env_file:
+      - .env
+    environment:
+      - DATA_DIR=/app/data
+      - MCP_HOST=0.0.0.0
+      - MCP_PORT=8765
+    restart: unless-stopped

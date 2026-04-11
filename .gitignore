@@ -1,0 +1,19 @@
+# Secrets — never commit
+.env
+
+# Runtime data — stays on host as Docker volume
+data/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+dist/
+build/
+*.egg-info/
+
+# OS
+.DS_Store
+Thumbs.db

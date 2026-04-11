@@ -1,0 +1,12 @@
+# Never bake secrets or data into the image
+.env
+data/
+
+# Dev-only files — not needed inside container
+init.py
+test_connectivity.py
+.gitignore
+.git/
+__pycache__/
+*.pyc
+*.pyo
