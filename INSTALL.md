@@ -40,7 +40,7 @@ At the end it prints the full integration guide **with your API key already fill
 
 ```bash
 python deploy.py              # full deploy (build from source)
-python deploy.py --pull       # use pre-built image from Docker Hub (rajkob/mcp-remote-executor:11042026-v2)
+python deploy.py --pull       # use pre-built image from Docker Hub (rajkob/mcp-remote-executor:latest)
 python deploy.py --restart    # restart existing container only
 python deploy.py --status     # check if server is running
 ```

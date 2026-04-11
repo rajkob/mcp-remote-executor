@@ -21,7 +21,7 @@ import urllib.request
 from pathlib import Path
 
 BASE_DIR = Path(__file__).parent
-DOCKER_IMAGE = "rajkob/mcp-remote-executor:11042026-v2"
+DOCKER_IMAGE = "rajkob/mcp-remote-executor:latest"
 MCP_PORT = 8765
 MCP_HOST = "127.0.0.1"
 MCP_URL = f"http://{MCP_HOST}:{MCP_PORT}/sse"
