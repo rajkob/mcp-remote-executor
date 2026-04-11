@@ -12,6 +12,7 @@ Usage:
 import argparse
 import platform
 import re
+import secrets
 import socket
 import subprocess
 import sys
@@ -148,7 +149,7 @@ def wsl_check_step() -> bool:
 # ── 3. Initialisation ─────────────────────────────────────────────────────────
 
 def run_init() -> bool:
-    head("[ 3 / 5 ]  Initialisation")
+    head("[ 3 / 6 ]  Initialisation")
     try:
         from cryptography.fernet import Fernet  # noqa: F401
     except ImportError:
@@ -165,10 +166,70 @@ def run_init() -> bool:
     return r.returncode == 0
 
 
-# ── 4. Build / pull + start ───────────────────────────────────────────────────
+# ── 4. API Key Setup ──────────────────────────────────────────────────────────
+
+def setup_api_key() -> str:
+    """
+    Interactively configure MCP_API_KEY in .env and docker-compose.yml.
+    Returns the configured key (empty string = auth disabled).
+    """
+    head("[ 4 / 6 ]  API Key Authentication")
+
+    env_file = BASE_DIR / ".env"
+    compose_file = BASE_DIR / "docker-compose.yml"
+
+    # Read current .env
+    env_content = env_file.read_text(encoding="utf-8") if env_file.exists() else ""
+
+    # Check if already configured
+    existing = re.search(r"^MCP_API_KEY=(.+)$", env_content, re.MULTILINE)
+    if existing and existing.group(1).strip():
+        current_key = existing.group(1).strip()
+        ok(f"API key already configured in .env (length: {len(current_key)} chars).")
+        print(f"  → Auth is ENABLED. Use '{CYAN}python deploy.py --reset-key{RESET}' to regenerate.")
+        return current_key
+
+    # Ask user
+    print(f"  Enable API key authentication?")
+    print(f"  {YELLOW}Recommended{RESET} for shared/remote deployments. Safe to skip for local-only use.")
+    print(f"  [Y] Generate a random key and enable auth")
+    print(f"  [N] Skip — run without authentication")
+    choice = input(f"\n  Your choice (Y/n): ").strip().lower()
+
+    if choice in ("n", "no"):
+        warn("Authentication DISABLED — ensure port 8765 is firewalled to trusted networks only.")
+        return ""
+
+    # Generate key
+    api_key = secrets.token_urlsafe(32)
+
+    # Write to .env
+    if "MCP_API_KEY=" in env_content:
+        env_content = re.sub(r"^MCP_API_KEY=.*$", f"MCP_API_KEY={api_key}", env_content, flags=re.MULTILINE)
+    else:
+        env_content = env_content.rstrip() + f"\nMCP_API_KEY={api_key}\n"
+    env_file.write_text(env_content, encoding="utf-8")
+    ok(f"API key written to .env")
+
+    # Uncomment MCP_API_KEY line in docker-compose.yml
+    if compose_file.exists():
+        dc = compose_file.read_text(encoding="utf-8")
+        dc = dc.replace(
+            "      # - MCP_API_KEY=${MCP_API_KEY}",
+            "      - MCP_API_KEY=${MCP_API_KEY}"
+        )
+        compose_file.write_text(dc, encoding="utf-8")
+        ok("docker-compose.yml updated — MCP_API_KEY enabled.")
+
+    print(f"\n  {BOLD}Your API key:{RESET} {CYAN}{api_key}{RESET}")
+    print(f"  {YELLOW}Copy this — you'll need it in your client config.{RESET}")
+    return api_key
+
+
+# ── 5. Build / pull + start ───────────────────────────────────────────────────
 
 def deploy(use_pull: bool = False) -> bool:
-    head("[ 4 / 5 ]  Docker Deploy")
+    head("[ 5 / 6 ]  Docker Deploy")
 
     compose_file = BASE_DIR / "docker-compose.yml"
     if not compose_file.exists():
@@ -219,7 +280,7 @@ def restart_only() -> bool:
 # ── 5. Health check ───────────────────────────────────────────────────────────
 
 def health_check(timeout: int = 30) -> bool:
-    head("[ 5 / 5 ]  Health Check")
+    head("[ 6 / 6 ]  Health Check")
     info(f"Waiting for MCP server at {MCP_URL} (up to {timeout}s)...")
 
     deadline = time.time() + timeout
@@ -277,15 +338,26 @@ def check_status() -> bool:
 
 # ── Integration info ──────────────────────────────────────────────────────────
 
-def print_integration_info():
+def print_integration_info(api_key: str = ""):
     w = 60
     print()
     print("=" * w)
     print(f"{BOLD}  MCP Server is ready — Integration Guide{RESET}")
     print("=" * w)
 
+    auth_note = ""
+    header_snippet = ""
+    npx_key_note = ""
+    if api_key:
+        auth_note = f"\n{BOLD}API Key:{RESET}     {CYAN}{api_key}{RESET}  {YELLOW}← keep this safe{RESET}"
+        header_snippet = f'\n         "headers": {{ "X-MCP-Key": "{api_key}" }}'
+        npx_key_note = (
+            f"\n       Note: mcp-remote supports headers via env var:\n"
+            f"       MCP_REMOTE_HEADER_X_MCP_KEY={api_key}"
+        )
+
     print(f"""
-{BOLD}Server URL:{RESET}  {CYAN}http://localhost:{MCP_PORT}/sse{RESET}
+{BOLD}Server URL:{RESET}  {CYAN}http://localhost:{MCP_PORT}/sse{RESET}{auth_note}
 
 {BOLD}── VS Code (GitHub Copilot Agent) ──{RESET}
 1. Open Command Palette → "Preferences: Open User Settings (JSON)"
@@ -295,7 +367,7 @@ def print_integration_info():
      "servers": {{
        "remote-executor": {{
          "type": "sse",
-         "url": "http://localhost:{MCP_PORT}/sse"
+         "url": "http://localhost:{MCP_PORT}/sse"{header_snippet}
        }}
      }}
    }}{RESET}
@@ -312,7 +384,7 @@ Add to %APPDATA%\\Claude\\claude_desktop_config.json:
        "command": "npx",
        "args": ["-y", "mcp-remote", "http://localhost:{MCP_PORT}/sse"]
      }}
-   }}{RESET}
+   }}{RESET}{npx_key_note}
 
 Restart Claude Desktop.
 
@@ -368,27 +440,48 @@ def main():
     if args.restart:
         if restart_only():
             ok("Container restarted.")
+            api_key = _read_api_key_from_env()
             health_check()
-            print_integration_info()
+            print_integration_info(api_key)
         else:
             err("Restart failed. Run: docker compose logs remote-executor")
         return
 
-    # Full deployment
-    steps = [
-        check_prerequisites,
-        wsl_check_step,
-        run_init,
-        lambda: deploy(use_pull=args.pull),
-        lambda: health_check(timeout=30),
-    ]
+    # Full deployment — run each step, collect api_key from step 4
+    api_key = ""
 
-    for step in steps:
-        if not step():
-            print(f"\n{RED}Deployment stopped — see errors above.{RESET}\n")
-            sys.exit(1)
+    if not check_prerequisites():
+        print(f"\n{RED}Deployment stopped — see errors above.{RESET}\n")
+        sys.exit(1)
 
-    print_integration_info()
+    if not wsl_check_step():
+        print(f"\n{RED}Deployment stopped — see errors above.{RESET}\n")
+        sys.exit(1)
+
+    if not run_init():
+        print(f"\n{RED}Deployment stopped — see errors above.{RESET}\n")
+        sys.exit(1)
+
+    api_key = setup_api_key()  # step 4 — may be empty if user skips auth
+
+    if not deploy(use_pull=args.pull):
+        print(f"\n{RED}Deployment stopped — see errors above.{RESET}\n")
+        sys.exit(1)
+
+    if not health_check(timeout=30):
+        print(f"\n{RED}Deployment stopped — see errors above.{RESET}\n")
+        sys.exit(1)
+
+    print_integration_info(api_key)
+
+
+def _read_api_key_from_env() -> str:
+    """Read MCP_API_KEY from .env file if present."""
+    env_file = BASE_DIR / ".env"
+    if not env_file.exists():
+        return ""
+    m = re.search(r"^MCP_API_KEY=(.+)$", env_file.read_text(encoding="utf-8"), re.MULTILINE)
+    return m.group(1).strip() if m else ""
 
 
 if __name__ == "__main__":

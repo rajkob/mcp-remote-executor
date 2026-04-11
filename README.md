@@ -222,6 +222,36 @@ extra_hosts:
 
 - Credentials are encrypted with **Fernet (AES-128-CBC + HMAC-SHA256)**
 - The `CRED_MASTER_KEY` is the only secret — back it up safely
-- Server binds to `127.0.0.1:8765` by default (host networking) — not exposed externally
+- Server binds to `0.0.0.0:8765` — firewall port 8765 to trusted networks only
 - All SSH host keys are auto-accepted (AutoAddPolicy) — suitable for internal/VPN networks
 - `.env` and `data/` are in `.gitignore` — never committed
+
+---
+
+## API Key Authentication
+
+The server supports optional API key authentication via the `MCP_API_KEY` env var.
+
+**Enable during deployment** — `deploy.py` asks interactively and configures everything automatically.
+
+**Enable manually:**
+```ini
+# .env
+MCP_API_KEY=your-strong-random-key-here
+```
+Uncomment in `docker-compose.yml`:
+```yaml
+- MCP_API_KEY=${MCP_API_KEY}
+```
+Restart: `docker compose restart remote-executor`
+
+**VS Code client config with auth:**
+```json
+"remote-executor": {
+  "type": "sse",
+  "url": "http://localhost:8765/sse",
+  "headers": { "X-MCP-Key": "your-strong-random-key-here" }
+}
+```
+
+Without `MCP_API_KEY` the server runs with auth disabled — safe for local-only deployments behind a firewall.

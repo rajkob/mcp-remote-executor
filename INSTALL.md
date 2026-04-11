@@ -21,17 +21,18 @@ That's it. The script handles all steps below automatically.
 
 ---
 
-## What `deploy.py` Does (5 steps)
+## What `deploy.py` Does (6 steps)
 
 | Step | Action |
 |---|---|
 | 1 | Checks Docker is installed and running |
 | 2 | Checks/fixes WSL2 mirrored networking in `~/.wslconfig` (Windows only) |
 | 3 | Runs `init.py` — creates `data/`, generates `.env` with encryption key |
-| 4 | Builds Docker image and starts the container |
-| 5 | Health-checks `http://localhost:8765/sse` and confirms server is up |
+| 4 | **API key setup** — asks whether to enable auth, generates and saves key |
+| 5 | Builds Docker image and starts the container |
+| 6 | Health-checks `http://localhost:8765/sse` and confirms server is up |
 
-At the end it prints the full integration guide for your LLM client.
+At the end it prints the full integration guide **with your API key already filled in**.
 
 ---
 
@@ -92,6 +93,7 @@ curl http://localhost:8765/sse
 
 Open **User Settings JSON** (`Ctrl+Shift+P` → `Preferences: Open User Settings (JSON)`):
 
+**Without auth:**
 ```json
 {
   "mcp": {
@@ -99,6 +101,21 @@ Open **User Settings JSON** (`Ctrl+Shift+P` → `Preferences: Open User Settings
       "remote-executor": {
         "type": "sse",
         "url": "http://localhost:8765/sse"
+      }
+    }
+  }
+}
+```
+
+**With API key auth:**
+```json
+{
+  "mcp": {
+    "servers": {
+      "remote-executor": {
+        "type": "sse",
+        "url": "http://localhost:8765/sse",
+        "headers": { "X-MCP-Key": "<your-api-key>" }
       }
     }
   }
@@ -139,6 +156,22 @@ Add to `~/.continue/config.json`:
     }]
   }
 }
+```
+
+---
+
+## Authentication
+
+`deploy.py` asks during setup whether to enable API key auth. If enabled:
+- A random key is generated and saved to `.env` as `MCP_API_KEY`
+- `docker-compose.yml` is updated automatically
+- The integration guide printed at the end includes your key ready to paste
+
+To enable/change the key after initial deployment:
+```bash
+# Edit .env — set MCP_API_KEY=<new-key>
+# Then restart:
+docker compose restart remote-executor
 ```
 
 ---
