@@ -18,6 +18,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
+import uvicorn
 from fastmcp import FastMCP
 
 import credentials as creds
@@ -31,6 +32,53 @@ _PROMPT_FILE = Path(__file__).parent / "system_prompt.md"
 _INSTRUCTIONS = _PROMPT_FILE.read_text(encoding="utf-8") if _PROMPT_FILE.exists() else ""
 
 mcp = FastMCP("remote-executor", instructions=_INSTRUCTIONS)
+
+
+# ─── API KEY MIDDLEWARE ───────────────────────────────────────────────────────
+
+class APIKeyMiddleware:
+    """
+    Pure ASGI middleware — enforces X-MCP-Key header or ?api_key= query param.
+    Only active when MCP_API_KEY env var is set and non-empty.
+    Path /health is always allowed without auth.
+    """
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        api_key = os.getenv("MCP_API_KEY", "").strip()
+
+        # Auth disabled or non-HTTP scope (lifespan etc.) — pass through
+        if not api_key or scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        # Always allow health check
+        if scope.get("path", "") == "/health":
+            await self.app(scope, receive, send)
+            return
+
+        # Check X-MCP-Key header
+        headers = {k.lower(): v for k, v in scope.get("headers", [])}
+        provided = headers.get(b"x-mcp-key", b"").decode()
+
+        # Fall back to ?api_key= query param
+        if not provided:
+            query = scope.get("query_string", b"").decode()
+            for param in query.split("&"):
+                if param.startswith("api_key="):
+                    provided = param[8:]
+                    break
+
+        if provided != api_key:
+            body = b"401 Unauthorized - X-MCP-Key header or ?api_key= param required"
+            await send({"type": "http.response.start", "status": 401,
+                        "headers": [(b"content-type", b"text/plain"),
+                                    (b"content-length", str(len(body)).encode())]})
+            await send({"type": "http.response.body", "body": body})
+            return
+
+        await self.app(scope, receive, send)
 
 
 # ─── HOST MANAGEMENT ──────────────────────────────────────────────────────────
@@ -426,6 +474,19 @@ def save_output(content: str, label: str, command: str) -> str:
 if __name__ == "__main__":
     host = os.getenv("MCP_HOST", "0.0.0.0")
     port = int(os.getenv("MCP_PORT", "8765"))
+    api_key = os.getenv("MCP_API_KEY", "").strip()
+
     print(f"Starting Remote Executor MCP server on {host}:{port}")
+    if api_key:
+        print("Authentication: ENABLED (X-MCP-Key header required)")
+    else:
+        print("Authentication: DISABLED (set MCP_API_KEY in .env to enable)")
     print(f"Connect clients to: http://localhost:{port}/sse")
-    mcp.run(transport="sse", host=host, port=port)
+
+    # Wrap FastMCP SSE app with API key middleware
+    try:
+        sse_app = mcp.sse_app()
+    except AttributeError:
+        sse_app = mcp.get_asgi_app(transport="sse")
+
+    uvicorn.run(APIKeyMiddleware(sse_app), host=host, port=port)
