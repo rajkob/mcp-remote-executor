@@ -12,8 +12,8 @@ Give AI assistants **SSH access to your remote servers** — run commands, trans
 
 ## What it does
 
-- **23 MCP tools** — run commands, upload/download files, ping hosts, manage credentials, health check
-- **Web dashboard** — live CPU / memory / disk / uptime for all hosts at `http://localhost:8765/dashboard`
+- **23 MCP tools** — run commands, upload/download files, check reachability, manage credentials, health check
+- **Web dashboard** — live CPU / memory / disk / uptime for all hosts at `http://localhost:8766/dashboard`
 - **Execution log panel** — recent SSH command history, filterable by host, live in the dashboard
 - **VPN-friendly** — Docker `network_mode: host` — private subnets reachable out of the box
 - **Encrypted credentials** — Fernet (AES-128-CBC + HMAC-SHA256), never plaintext on disk
@@ -26,20 +26,22 @@ Give AI assistants **SSH access to your remote servers** — run commands, trans
 
 ```
 LLM Client (VS Code / Claude Desktop)    Browser (Dashboard)
-       │  HTTP/SSE  :8765/sse                │  :8765/dashboard
-       │                                     │  :8765/api/status
+       │  HTTP/SSE  :8765/sse                │  :8766/dashboard
+       │                                     │  :8766/api/status
        └──────────────┬──────────────────────┘
                       ▼
 ┌─────────────────────────────────────────┐
 │   Docker container                      │
-│   FastMCP server + Dashboard router     │
+│   FastMCP server (port 8765)            │
+│   Dashboard API  (port 8766)            │
 │   network_mode: host                    │  ← inherits host VPN routes
 │                                         │
 │   paramiko SSH/SFTP                     │
 │   Fernet-encrypted credentials          │
 │   monitor.py — SSH metric collection    │
+│   TCP port check — no ICMP required     │
 └─────────────────────────────────────────┘
-       │  SSH  port 22
+       │  SSH  (configurable port per host)
        ▼
 Remote hosts (private subnet / VPN)
 ```
@@ -179,7 +181,7 @@ Add to `~/.continue/config.json`:
 | Execution | `run_command_multi` | Run command on multiple hosts (sequential/parallel) |
 | Execution | `upload_file` | Upload file via SFTP |
 | Execution | `download_file` | Download file via SFTP |
-| Connectivity | `ping_hosts` | Ping hosts to check reachability |
+| Connectivity | `ping_hosts` | TCP connect to SSH port — check reachability (works even when ICMP is blocked) |
 | Connectivity | `health_check` | Full check: ping → SSH → disk/CPU/mem snapshot |
 | Templates | `list_templates` | List command templates |
 | Templates | `expand_template` | Preview template with alias substitution |
@@ -246,6 +248,7 @@ extra_hosts:
 - The `CRED_MASTER_KEY` is the only secret — back it up safely
 - Server binds to `0.0.0.0:8765` — firewall port 8765 to trusted networks only
 - All SSH host keys are auto-accepted (AutoAddPolicy) — suitable for internal/VPN networks
+- Host reachability uses **TCP connect to the SSH port** — works on VMs where ICMP (ping) is firewalled
 - `.env` and `data/` are in `.gitignore` — never committed
 
 ---
