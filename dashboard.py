@@ -45,7 +45,8 @@ def _auth_ok(scope) -> bool:
             if param.startswith("api_key="):
                 provided = param[8:]
                 break
-    return provided == API_KEY if not API_KEY else hmac.compare_digest(provided, API_KEY)
+    # API_KEY is non-empty here (empty case returned True above)
+    return hmac.compare_digest(provided, API_KEY)
 
 
 class DashboardApp:

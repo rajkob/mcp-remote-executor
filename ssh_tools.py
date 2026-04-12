@@ -4,6 +4,7 @@ SSH and SFTP operations via paramiko.
 Replaces plink/pscp — pure Python, works on any OS inside Docker.
 All operations auto-log to exec.log on completion.
 """
+import socket
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -85,7 +86,9 @@ def ssh_exec(alias: str, command: str, timeout: int | None = None) -> dict:
             stdout = stdout_ch.read().decode(errors="replace")
             stderr = stderr_ch.read().decode(errors="replace")
             exit_code = stdout_ch.channel.recv_exit_status()
-        except Exception:
+        except (socket.timeout, EOFError):
+            # socket.timeout: channel read timed out
+            # EOFError: paramiko raises this on unexpected channel close / disconnect
             raise CommandTimeout(
                 f"Command timed out after {effective_timeout}s on {alias} ({host['ip']})"
             )

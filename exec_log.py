@@ -51,14 +51,17 @@ def append(alias: str, ip: str, port: int, user: str, exit_code: int, command: s
 
 def read(n: int = 50) -> list[dict]:
     """Return last n log entries as list of dicts."""
+    from collections import deque
     path = _log_file()
     if not path.exists():
         return []
+    # deque with maxlen reads the file line-by-line keeping only the last n —
+    # avoids loading the entire log into memory.
     with open(path, encoding="utf-8") as f:
-        lines = f.readlines()
+        lines = deque(f, maxlen=n)
 
     result = []
-    for line in lines[-n:]:
+    for line in lines:
         parts = line.strip().split(" | ", 5)
         if len(parts) == 6:
             result.append({
