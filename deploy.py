@@ -358,6 +358,7 @@ def print_integration_info(api_key: str = ""):
 
     print(f"""
 {BOLD}Server URL:{RESET}  {CYAN}http://localhost:{MCP_PORT}/sse{RESET}{auth_note}
+{BOLD}Dashboard:{RESET}   {CYAN}http://localhost:{MCP_PORT}/dashboard{RESET}
 
 {BOLD}── VS Code (GitHub Copilot Agent) ──{RESET}
 1. Open Command Palette → "Preferences: Open User Settings (JSON)"

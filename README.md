@@ -7,17 +7,20 @@ A Dockerized Python MCP server that exposes SSH remote execution tools to any LL
 ## Architecture
 
 ```
-LLM Client (VS Code / Claude Desktop)
-       │  HTTP/SSE  http://localhost:8765/sse
-       ▼
-┌─────────────────────────────────┐
-│   Docker container              │
-│   FastMCP server (server.py)    │
-│   network_mode: host            │  ← inherits host VPN routes
-│                                 │
-│   paramiko SSH/SFTP             │
-│   Fernet-encrypted credentials  │
-└─────────────────────────────────┘
+LLM Client (VS Code / Claude Desktop)    Browser (Dashboard)
+       │  HTTP/SSE  :8765/sse                │  :8765/dashboard
+       │                                     │  :8765/api/status
+       └──────────────┬──────────────────────┘
+                      ▼
+┌─────────────────────────────────────────┐
+│   Docker container                      │
+│   FastMCP server + Dashboard router     │
+│   network_mode: host                    │  ← inherits host VPN routes
+│                                         │
+│   paramiko SSH/SFTP                     │
+│   Fernet-encrypted credentials          │
+│   monitor.py — SSH metric collection    │
+└─────────────────────────────────────────┘
        │  SSH  port 22
        ▼
 Remote hosts (private subnet / VPN)
@@ -255,3 +258,36 @@ Restart: `docker compose restart remote-executor`
 ```
 
 Without `MCP_API_KEY` the server runs with auth disabled — safe for local-only deployments behind a firewall.
+
+---
+
+## Web Dashboard
+
+Open in your browser after deployment:
+
+```
+http://localhost:8765/dashboard
+```
+
+```
+┌─────────────────────────────────────────────────────┐
+│  ⚡ MCP Remote Executor — Dashboard        ⟳ Auto  │
+├──────────┬──────────┬──────────┬──────────┬─────────┤
+│ Hosts: 6 │ Online:5 │ Down: 1  │ CPU: 34% │ Mem:61% │
+├──────────┴──────────┴──────────┴──────────┴─────────┤
+│ ● web01  10.0.0.1   OK    CPU ██░░ 45%  MEM ███ 61% │
+│ ● web02  10.0.0.2   OK    CPU █░░░ 12%  MEM ██░ 48% │
+│ ✗ db01   10.0.0.10  UNREACHABLE                      │
+└─────────────────────────────────────────────────────┘
+```
+
+**Features:**
+- Host status grid (OK / Unreachable / Error) with colour-coded borders
+- Progress bars for CPU %, memory %, disk % per host
+- Uptime display
+- Summary cards (total, online, avg CPU, avg mem)
+- Auto-refresh every 30 seconds (toggle)
+- API key input field (if auth is enabled)
+- Metrics cached 30s server-side — parallel SSH collection
+
+**Workflow:** Use the dashboard for passive monitoring, VS Code Agent mode for AI-driven investigation and fixes — both connect to the same server.

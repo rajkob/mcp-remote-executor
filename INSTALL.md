@@ -32,7 +32,30 @@ That's it. The script handles all steps below automatically.
 | 5 | Builds Docker image and starts the container |
 | 6 | Health-checks `http://localhost:8765/sse` and confirms server is up |
 
-At the end it prints the full integration guide **with your API key already filled in**.
+At the end it prints the full integration guide **with your API key already filled in** and the dashboard URL.
+
+---
+
+## Web Dashboard
+
+Once the server is running, open in your browser:
+
+```
+http://localhost:8765/dashboard
+```
+
+The dashboard shows a live view of all hosts in `vms.yaml`:
+
+| Panel | What it shows |
+|---|---|
+| Summary bar | Total hosts, online count, avg CPU, avg mem |
+| Host cards | Status (OK / Unreachable / Error), CPU %, memory %, disk %, uptime |
+| Auto-refresh | Toggle 30-second auto-refresh |
+| API key field | Enter your `MCP_API_KEY` if auth is enabled |
+
+Metrics are collected via SSH and cached for 30 seconds. Click **⟳ Refresh** to force an update.
+
+> **Workflow tip:** Keep the dashboard open in a browser tab for monitoring, and use VS Code Agent mode for AI-assisted troubleshooting & fixes — both connect to the same MCP server.
 
 ---
 
