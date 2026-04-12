@@ -84,8 +84,8 @@ def _collect_host(host: dict) -> dict:
         "error": None,
     }
 
-    # Ping first — fast reachability check
-    ping_result = ping_tools.ping_host(host["ip"])
+    # TCP connect to SSH port — works even when ICMP is firewalled
+    ping_result = ping_tools.ping_host(host["ip"], port=host.get("port", 22))
     if not ping_result.get("up"):
         result["status"] = "unreachable"
         return result
