@@ -14,6 +14,7 @@ Tools are grouped by category:
 """
 import os
 import re
+import hmac
 from datetime import datetime
 from pathlib import Path
 from typing import Literal
@@ -22,6 +23,7 @@ import uvicorn
 from fastmcp import FastMCP
 
 import credentials as creds
+import dashboard as dash
 import exec_log
 import ping_tools
 import ssh_tools
@@ -70,7 +72,7 @@ class APIKeyMiddleware:
                     provided = param[8:]
                     break
 
-        if provided != api_key:
+        if not hmac.compare_digest(provided, api_key):
             body = b"401 Unauthorized - X-MCP-Key header or ?api_key= param required"
             await send({"type": "http.response.start", "status": 401,
                         "headers": [(b"content-type", b"text/plain"),
@@ -469,12 +471,73 @@ def save_output(content: str, label: str, command: str) -> str:
     return f"✓ Output saved to /app/data/output/{filename}"
 
 
+# ─── HEALTH CHECK ─────────────────────────────────────────────────────────────
+
+@mcp.tool()
+def health_check(alias: str) -> str:
+    """
+    Full health check for a host: ping → SSH → disk / CPU / memory snapshot.
+    Returns a pass/fail report. Use this to quickly verify a host is reachable
+    and accepting SSH connections before running commands.
+    """
+    try:
+        host = vms.get_host(alias)
+    except vms.HostNotFound as e:
+        return f"❌ {e}"
+
+    lines = [f"## Health Check: `{alias}` ({host['ip']})\n"]
+
+    # 1. Ping
+    ping_result = ping_tools.ping_host(host["ip"])
+    if not ping_result.get("up"):
+        lines.append("| Check | Result |")
+        lines.append("|---|---|")
+        lines.append(f"| PING  | ❌ UNREACHABLE |")
+        lines.append("\n⚠️ Host is not reachable via ICMP. Check VPN / network connectivity.")
+        return "\n".join(lines)
+
+    lines.append("| Check | Result |")
+    lines.append("|---|---|")
+    lines.append(f"| PING  | ✅ OK |")
+
+    # 2. SSH + quick metrics
+    try:
+        import time as _time
+        t0 = _time.monotonic()
+        r = ssh_tools.ssh_exec(
+            alias,
+            "uptime && printf 'MEM: ' && free -m | awk '/Mem:/{printf \"%s/%s MB\\n\",$3,$2}' "
+            "&& printf 'DISK: ' && df -h / | awk 'NR==2{print $3\"/\"$2\" (\"$5\")\"}'",
+            timeout=10,
+        )
+        elapsed = round(_time.monotonic() - t0, 1)
+        lines.append(f"| SSH   | ✅ OK (exit {r['exit_code']}, {elapsed}s) |")
+        if r.get("stdout"):
+            lines.append(f"\n```\n{r['stdout'].strip()}\n```")
+    except ssh_tools.CredentialNotFound as e:
+        lines.append(f"| SSH   | ❌ No credential stored — run `save_credential({alias!r}, ...)` |")
+        lines.append(f"\n{e}")
+    except ssh_tools.AuthFailure as e:
+        lines.append(f"| SSH   | ❌ Authentication failed |")
+        lines.append(f"\n{e}")
+    except ssh_tools.HostUnreachable as e:
+        lines.append(f"| SSH   | ❌ Port unreachable (firewall?) |")
+        lines.append(f"\n{e}")
+    except ssh_tools.CommandTimeout:
+        lines.append(f"| SSH   | ⏱ Timed out (10s) |")
+    except Exception as e:
+        lines.append(f"| SSH   | ❌ {e} |")
+
+    return "\n".join(lines)
+
+
 # ─── ENTRYPOINT ───────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     host = os.getenv("MCP_HOST", "0.0.0.0")
     port = int(os.getenv("MCP_PORT", "8765"))
     api_key = os.getenv("MCP_API_KEY", "").strip()
+    dashboard_enabled = os.getenv("MCP_DASHBOARD", "true").lower() not in ("0", "false", "no")
 
     print(f"Starting Remote Executor MCP server on {host}:{port}")
     if api_key:
@@ -482,11 +545,20 @@ if __name__ == "__main__":
     else:
         print("Authentication: DISABLED (set MCP_API_KEY in .env to enable)")
     print(f"Connect clients to: http://localhost:{port}/sse")
+    if dashboard_enabled:
+        print(f"Dashboard:          http://localhost:{port}/dashboard")
+    else:
+        print("Dashboard:          DISABLED (MCP_DASHBOARD=false)")
 
-    # Wrap FastMCP SSE app with API key middleware
+    # Wrap FastMCP SSE app with API key middleware + optional dashboard router
     try:
         sse_app = mcp.sse_app()
     except AttributeError:
         sse_app = mcp.get_asgi_app(transport="sse")
 
-    uvicorn.run(APIKeyMiddleware(sse_app), host=host, port=port)
+    if dashboard_enabled:
+        app = dash.RouterApp(APIKeyMiddleware(sse_app))
+    else:
+        app = APIKeyMiddleware(sse_app)
+
+    uvicorn.run(app, host=host, port=port)
