@@ -13,7 +13,7 @@ Give AI assistants **SSH access to your remote servers** — run commands, trans
 ## What it does
 
 - **23 MCP tools** — run commands, upload/download files, check reachability, manage credentials, health check
-- **Web dashboard** — live CPU / memory / disk / uptime for all hosts at `http://localhost:8766/dashboard`
+- **Web dashboard** — live CPU / memory / disk / uptime for all hosts at `http://localhost:8765/dashboard`
 - **Execution log panel** — recent SSH command history, filterable by host, live in the dashboard
 - **VPN-friendly** — Docker `network_mode: host` — private subnets reachable out of the box
 - **Encrypted credentials** — Fernet (AES-128-CBC + HMAC-SHA256), never plaintext on disk
@@ -26,14 +26,14 @@ Give AI assistants **SSH access to your remote servers** — run commands, trans
 
 ```
 LLM Client (VS Code / Claude Desktop)    Browser (Dashboard)
-       │  HTTP/SSE  :8765/sse                │  :8766/dashboard
-       │                                     │  :8766/api/status
+       │  HTTP/SSE  :8765/sse                │  :8765/dashboard
+       │                                     │  :8765/api/status
        └──────────────┬──────────────────────┘
                       ▼
 ┌─────────────────────────────────────────┐
-│   Docker container                      │
-│   FastMCP server (port 8765)            │
-│   Dashboard API  (port 8766)            │
+│   Docker container (port 8765)          │
+│   ├─ FastMCP SSE handler  /sse           │
+│   └─ Dashboard + API      /dashboard     │  ← same port, path-routed
 │   network_mode: host                    │  ← inherits host VPN routes
 │                                         │
 │   paramiko SSH/SFTP                     │

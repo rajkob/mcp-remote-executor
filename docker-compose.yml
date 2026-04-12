@@ -4,7 +4,9 @@ services:
     image: mcp-remote-executor:latest
     # network_mode: host — container shares the host network stack,
     # including VPN routes, so private subnets (10.24.x.x) are reachable.
-    # Connect clients to: http://localhost:8765/sse
+    # MCP SSE endpoint:  http://localhost:8765/sse
+    # Web dashboard:     http://localhost:8765/dashboard  (same port, path-routed)
+    # API endpoints:     http://localhost:8765/api/status  /api/logs
     network_mode: host
     volumes:
       - ./data:/app/data
