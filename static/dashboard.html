@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MCP Remote Executor — Dashboard</title>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --surface: #161b22;
+      --border: #30363d;
+      --text: #e6edf3;
+      --muted: #8b949e;
+      --green: #3fb950;
+      --yellow: #d29922;
+      --red: #f85149;
+      --blue: #58a6ff;
+      --accent: #1f6feb;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', monospace; font-size: 14px; }
+
+    header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 14px 24px; background: var(--surface); border-bottom: 1px solid var(--border);
+    }
+    header h1 { font-size: 16px; font-weight: 600; color: var(--blue); }
+    header .controls { display: flex; gap: 10px; align-items: center; }
+    .btn {
+      background: var(--accent); color: #fff; border: none; padding: 6px 14px;
+      border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 500;
+    }
+    .btn:hover { opacity: 0.85; }
+    .btn.secondary { background: var(--surface); border: 1px solid var(--border); color: var(--text); }
+
+    #status-bar {
+      padding: 6px 24px; font-size: 12px; color: var(--muted);
+      background: var(--bg); border-bottom: 1px solid var(--border);
+      display: flex; gap: 20px; align-items: center;
+    }
+    #status-bar .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 5px; }
+    .dot.green { background: var(--green); }
+    .dot.red   { background: var(--red); }
+    .dot.yellow{ background: var(--yellow); }
+
+    #summary { display: flex; gap: 16px; padding: 16px 24px; flex-wrap: wrap; }
+    .stat-card {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+      padding: 14px 20px; min-width: 140px;
+    }
+    .stat-card .label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
+    .stat-card .value { font-size: 28px; font-weight: 700; margin-top: 4px; }
+    .stat-card .value.green { color: var(--green); }
+    .stat-card .value.red   { color: var(--red); }
+    .stat-card .value.yellow{ color: var(--yellow); }
+
+    #grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px; padding: 0 24px 24px; }
+
+    .host-card {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+      padding: 16px; transition: border-color 0.2s;
+    }
+    .host-card:hover { border-color: var(--accent); }
+    .host-card.ok         { border-left: 3px solid var(--green); }
+    .host-card.unreachable{ border-left: 3px solid var(--red); }
+    .host-card.error      { border-left: 3px solid var(--yellow); }
+    .host-card.loading    { border-left: 3px solid var(--border); opacity: 0.6; }
+
+    .host-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px; }
+    .host-name { font-weight: 600; font-size: 15px; }
+    .host-meta { font-size: 11px; color: var(--muted); margin-top: 2px; }
+    .badge {
+      font-size: 11px; padding: 2px 8px; border-radius: 12px; font-weight: 600;
+      text-transform: uppercase;
+    }
+    .badge.ok         { background: rgba(63,185,80,0.15); color: var(--green); }
+    .badge.unreachable{ background: rgba(248,81,73,0.15);  color: var(--red); }
+    .badge.error      { background: rgba(210,153,34,0.15); color: var(--yellow); }
+    .badge.loading    { background: rgba(139,148,158,0.15); color: var(--muted); }
+
+    .metrics { display: flex; flex-direction: column; gap: 8px; }
+    .metric-row { display: flex; align-items: center; gap: 10px; font-size: 12px; }
+    .metric-label { color: var(--muted); width: 40px; flex-shrink: 0; }
+    .bar-track { flex: 1; background: var(--border); border-radius: 4px; height: 6px; overflow: hidden; }
+    .bar-fill  { height: 100%; border-radius: 4px; transition: width 0.4s; }
+    .bar-fill.low    { background: var(--green); }
+    .bar-fill.medium { background: var(--yellow); }
+    .bar-fill.high   { background: var(--red); }
+    .metric-val { width: 42px; text-align: right; color: var(--text); font-weight: 500; }
+
+    .host-footer { margin-top: 10px; font-size: 11px; color: var(--muted); }
+    .error-msg { margin-top: 8px; font-size: 11px; color: var(--yellow); word-break: break-word; }
+
+    .loading-placeholder { text-align: center; color: var(--muted); padding: 60px 24px; font-size: 14px; }
+
+    #api-key-bar {
+      padding: 8px 24px; background: var(--surface); border-bottom: 1px solid var(--border);
+      display: flex; gap: 10px; align-items: center; font-size: 12px;
+    }
+    #api-key-bar label { color: var(--muted); }
+    #api-key-input {
+      background: var(--bg); border: 1px solid var(--border); color: var(--text);
+      padding: 4px 10px; border-radius: 6px; font-size: 12px; width: 280px;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>⚡ MCP Remote Executor — Dashboard</h1>
+  <div class="controls">
+    <span id="last-updated" style="font-size:12px;color:var(--muted)">Not loaded</span>
+    <button class="btn secondary" onclick="loadMetrics(true)">⟳ Refresh</button>
+    <button class="btn" onclick="toggleAutoRefresh()">▶ Auto</button>
+  </div>
+</header>
+
+<div id="api-key-bar">
+  <label for="api-key-input">API Key (if auth enabled):</label>
+  <input id="api-key-input" type="password" placeholder="Leave blank if auth disabled" />
+  <button class="btn secondary" onclick="loadMetrics(true)" style="padding:4px 12px;font-size:12px">Apply</button>
+</div>
+
+<div id="status-bar">
+  <span><span class="dot green"></span> <span id="cnt-ok">—</span> OK</span>
+  <span><span class="dot red"></span>   <span id="cnt-unreachable">—</span> Unreachable</span>
+  <span><span class="dot yellow"></span><span id="cnt-error">—</span> Error</span>
+  <span style="margin-left:auto">Auto-refresh: <span id="auto-label">OFF</span></span>
+</div>
+
+<div id="summary"></div>
+<div id="grid"><div class="loading-placeholder">Loading host metrics…</div></div>
+
+<script>
+  let autoTimer = null;
+  let autoOn = false;
+
+  function apiKey() { return document.getElementById('api-key-input').value.trim(); }
+
+  async function loadMetrics(force = false) {
+    const url = '/api/status' + (force ? '?refresh=1' : '');
+    const headers = {};
+    const key = apiKey();
+    if (key) headers['X-MCP-Key'] = key;
+
+    try {
+      const res = await fetch(url, { headers });
+      if (!res.ok) {
+        if (res.status === 401) showError('401 Unauthorized — enter your API key above.');
+        else showError(`HTTP ${res.status}`);
+        return;
+      }
+      const hosts = await res.json();
+      render(hosts);
+      document.getElementById('last-updated').textContent =
+        'Updated ' + new Date().toLocaleTimeString();
+    } catch (e) {
+      showError('Failed to connect: ' + e.message);
+    }
+  }
+
+  function showError(msg) {
+    document.getElementById('grid').innerHTML =
+      `<div class="loading-placeholder" style="color:var(--red)">${msg}</div>`;
+  }
+
+  function render(hosts) {
+    const ok    = hosts.filter(h => h.status === 'ok').length;
+    const unr   = hosts.filter(h => h.status === 'unreachable').length;
+    const err   = hosts.filter(h => h.status === 'error').length;
+
+    document.getElementById('cnt-ok').textContent = ok;
+    document.getElementById('cnt-unreachable').textContent = unr;
+    document.getElementById('cnt-error').textContent = err;
+
+    // Summary cards
+    const avgCpu = avg(hosts.filter(h => h.cpu_pct != null).map(h => h.cpu_pct));
+    const avgMem = avg(hosts.filter(h => h.mem).map(h => h.mem.pct));
+    document.getElementById('summary').innerHTML = `
+      <div class="stat-card"><div class="label">Total Hosts</div>
+        <div class="value">${hosts.length}</div></div>
+      <div class="stat-card"><div class="label">Online</div>
+        <div class="value ${ok === hosts.length ? 'green' : ok > 0 ? 'yellow' : 'red'}">${ok}</div></div>
+      <div class="stat-card"><div class="label">Unreachable</div>
+        <div class="value ${unr === 0 ? 'green' : 'red'}">${unr}</div></div>
+      <div class="stat-card"><div class="label">Avg CPU</div>
+        <div class="value ${colorClass(avgCpu)}">${avgCpu != null ? avgCpu.toFixed(1) + '%' : '—'}</div></div>
+      <div class="stat-card"><div class="label">Avg Memory</div>
+        <div class="value ${colorClass(avgMem)}">${avgMem != null ? avgMem.toFixed(1) + '%' : '—'}</div></div>
+    `;
+
+    // Host cards
+    document.getElementById('grid').innerHTML = hosts.length === 0
+      ? '<div class="loading-placeholder">No hosts found in vms.yaml</div>'
+      : hosts.map(hostCard).join('');
+  }
+
+  function hostCard(h) {
+    const status = h.status || 'loading';
+    let metrics = '';
+
+    if (status === 'ok') {
+      const cpu  = h.cpu_pct;
+      const mem  = h.mem;
+      const disk = h.disk;
+      metrics = `<div class="metrics">
+        ${cpu  != null  ? bar('CPU',  cpu,  cpu + '%') : ''}
+        ${mem           ? bar('MEM',  mem.pct, mem.pct + '% (' + mem.used_mb + '/' + mem.total_mb + ' MB)') : ''}
+        ${disk          ? bar('DISK', parseFloat(disk.pct), disk.pct + ' used (' + disk.avail + ' free)') : ''}
+      </div>`;
+    } else if (status === 'unreachable') {
+      metrics = '<div class="error-msg">Host is not reachable (ping failed)</div>';
+    } else if (status === 'error') {
+      metrics = `<div class="error-msg">${h.error || 'SSH error'}</div>`;
+    }
+
+    return `<div class="host-card ${status}">
+      <div class="host-header">
+        <div>
+          <div class="host-name">${h.alias}</div>
+          <div class="host-meta">${h.ip}${h.env ? ' · ' + h.env : ''}${h.zone ? ' · ' + h.zone : ''}</div>
+        </div>
+        <span class="badge ${status}">${status}</span>
+      </div>
+      ${metrics}
+      ${h.uptime ? `<div class="host-footer">⏱ Up ${h.uptime}</div>` : ''}
+    </div>`;
+  }
+
+  function bar(label, pct, valText) {
+    const cls = pct >= 90 ? 'high' : pct >= 70 ? 'medium' : 'low';
+    return `<div class="metric-row">
+      <span class="metric-label">${label}</span>
+      <div class="bar-track"><div class="bar-fill ${cls}" style="width:${Math.min(pct,100)}%"></div></div>
+      <span class="metric-val">${valText}</span>
+    </div>`;
+  }
+
+  function avg(arr) { return arr.length ? arr.reduce((a,b)=>a+b,0)/arr.length : null; }
+  function colorClass(v) { return v == null ? '' : v >= 90 ? 'red' : v >= 70 ? 'yellow' : 'green'; }
+
+  function toggleAutoRefresh() {
+    autoOn = !autoOn;
+    document.getElementById('auto-label').textContent = autoOn ? 'ON (30s)' : 'OFF';
+    document.querySelector('.btn').textContent = autoOn ? '⏸ Auto' : '▶ Auto';
+    if (autoOn) { autoTimer = setInterval(() => loadMetrics(true), 30000); }
+    else { clearInterval(autoTimer); }
+  }
+
+  // Initial load
+  loadMetrics();
+</script>
+</body>
+</html>

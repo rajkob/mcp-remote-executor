@@ -22,6 +22,7 @@ import uvicorn
 from fastmcp import FastMCP
 
 import credentials as creds
+import dashboard as dash
 import exec_log
 import ping_tools
 import ssh_tools
@@ -482,11 +483,13 @@ if __name__ == "__main__":
     else:
         print("Authentication: DISABLED (set MCP_API_KEY in .env to enable)")
     print(f"Connect clients to: http://localhost:{port}/sse")
+    print(f"Dashboard:          http://localhost:{port}/dashboard")
 
-    # Wrap FastMCP SSE app with API key middleware
+    # Wrap FastMCP SSE app with API key middleware + dashboard router
     try:
         sse_app = mcp.sse_app()
     except AttributeError:
         sse_app = mcp.get_asgi_app(transport="sse")
 
-    uvicorn.run(APIKeyMiddleware(sse_app), host=host, port=port)
+    app = dash.RouterApp(APIKeyMiddleware(sse_app))
+    uvicorn.run(app, host=host, port=port)
