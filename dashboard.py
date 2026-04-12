@@ -12,6 +12,7 @@ import json
 import hmac
 import os
 from pathlib import Path
+from urllib.parse import parse_qs, unquote
 
 import exec_log
 import monitor
@@ -40,11 +41,8 @@ def _auth_ok(scope) -> bool:
     headers = {k.lower(): v for k, v in scope.get("headers", [])}
     provided = headers.get(b"x-mcp-key", b"").decode()
     if not provided:
-        query = scope.get("query_string", b"").decode()
-        for param in query.split("&"):
-            if param.startswith("api_key="):
-                provided = param[8:]
-                break
+        qs = parse_qs(scope.get("query_string", b"").decode())
+        provided = qs.get("api_key", [""])[0]
     # API_KEY is non-empty here (empty case returned True above)
     return hmac.compare_digest(provided, API_KEY)
 
@@ -69,8 +67,8 @@ class DashboardApp:
             if not _auth_ok(scope):
                 await self._send(send, *_json_response({"error": "unauthorized"}, 401))
                 return
-            query = scope.get("query_string", b"").decode()
-            force = "refresh=1" in query
+            qs = parse_qs(scope.get("query_string", b"").decode())
+            force = qs.get("refresh", ["0"])[0] == "1"
             metrics = monitor.get_all_metrics(force=force)
             await self._send(send, *_json_response(metrics))
         elif path == "/api/logs" or path.startswith("/api/logs/"):
@@ -79,15 +77,13 @@ class DashboardApp:
                 return
             # /api/logs          → last 200 entries for all hosts
             # /api/logs/{alias}  → filtered to one host
-            alias = path[len("/api/logs/"):] or None
-            query = scope.get("query_string", b"").decode()
+            alias = unquote(path[len("/api/logs/"):]) or None
+            qs = parse_qs(scope.get("query_string", b"").decode())
             n = 200
-            for param in query.split("&"):
-                if param.startswith("n="):
-                    try:
-                        n = max(1, min(int(param[2:]), 1000))
-                    except ValueError:
-                        pass
+            try:
+                n = max(1, min(int(qs.get("n", ["200"])[0]), 1000))
+            except ValueError:
+                pass
             entries = exec_log.read(n)
             if alias:
                 entries = [e for e in entries if e.get("alias") == alias]

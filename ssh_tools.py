@@ -67,11 +67,12 @@ def _connect(host: dict) -> paramiko.SSHClient:
     return client
 
 
-def ssh_exec(alias: str, command: str, timeout: int | None = None) -> dict:
+def ssh_exec(alias: str, command: str, timeout: int | None = None,
+             _log: bool = True) -> dict:
     """
     Run a shell command on a host. Returns dict:
       {alias, ip, stdout, stderr, exit_code, elapsed_s}
-    Auto-appends to exec.log.
+    Auto-appends to exec.log unless _log=False.
     """
     import exec_log
 
@@ -96,8 +97,9 @@ def ssh_exec(alias: str, command: str, timeout: int | None = None) -> dict:
         client.close()
 
     elapsed = round(time.monotonic() - start, 1)
-    exec_log.append(alias, host["ip"], host.get("port", 22),
-                    host.get("user", "root"), exit_code, command)
+    if _log:
+        exec_log.append(alias, host["ip"], host.get("port", 22),
+                        host.get("user", "root"), exit_code, command)
 
     return {
         "alias": alias,

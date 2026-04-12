@@ -103,7 +103,7 @@ def _collect_host(host: dict) -> dict:
     )
 
     try:
-        raw = ssh_tools.ssh_exec(host["alias"], combined, timeout=15)
+        raw = ssh_tools.ssh_exec(host["alias"], combined, timeout=15, _log=False)
         out = raw["stdout"]
         sections: dict[str, str] = {}
         current = None

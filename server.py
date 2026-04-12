@@ -66,11 +66,9 @@ class APIKeyMiddleware:
 
         # Fall back to ?api_key= query param
         if not provided:
-            query = scope.get("query_string", b"").decode()
-            for param in query.split("&"):
-                if param.startswith("api_key="):
-                    provided = param[8:]
-                    break
+            from urllib.parse import parse_qs
+            qs = parse_qs(scope.get("query_string", b"").decode())
+            provided = qs.get("api_key", [""])[0]
 
         if not hmac.compare_digest(provided, api_key):
             body = b"401 Unauthorized - X-MCP-Key header or ?api_key= param required"
@@ -488,17 +486,17 @@ def health_check(alias: str) -> str:
     lines = [f"## Health Check: `{alias}` ({host['ip']})\n"]
 
     # 1. Ping
-    ping_result = ping_tools.ping_host(host["ip"])
+    ping_result = ping_tools.ping_host(host["ip"], port=host.get("port", 22))
     if not ping_result.get("up"):
         lines.append("| Check | Result |")
         lines.append("|---|---|")
-        lines.append(f"| PING  | ❌ UNREACHABLE |")
-        lines.append("\n⚠️ Host is not reachable via ICMP. Check VPN / network connectivity.")
+        lines.append(f"| TCP:{host.get('port', 22)}  | ❌ UNREACHABLE |")
+        lines.append("\n⚠️ Host SSH port is not reachable. Check VPN / firewall / that SSH is running.")
         return "\n".join(lines)
 
     lines.append("| Check | Result |")
     lines.append("|---|---|")
-    lines.append(f"| PING  | ✅ OK |")
+    lines.append(f"| TCP:{host.get('port', 22)}  | ✅ OK |")
 
     # 2. SSH + quick metrics
     try:
