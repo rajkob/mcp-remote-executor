@@ -86,7 +86,7 @@ def _collect_host(host: dict) -> dict:
 
     # Ping first — fast reachability check
     ping_result = ping_tools.ping_host(host["ip"])
-    if not ping_result.get("reachable"):
+    if not ping_result.get("up"):
         result["status"] = "unreachable"
         return result
 
@@ -102,7 +102,8 @@ def _collect_host(host: dict) -> dict:
     )
 
     try:
-        out = ssh_tools.run_on_host(host, combined, timeout=15)
+        raw = ssh_tools.ssh_exec(host["alias"], combined, timeout=15)
+        out = raw["stdout"]
         sections: dict[str, str] = {}
         current = None
         for line in out.splitlines():
@@ -160,7 +161,7 @@ def get_all_metrics(force: bool = False) -> list[dict]:
 
 def _flatten_hosts() -> list[dict]:
     """Flatten vms.yaml projects → list of host dicts with _project injected."""
-    inventory = vms.load_vms()
+    inventory = vms.load_hosts()
     hosts = []
     for project, proj_data in inventory.get("projects", {}).items():
         for host in proj_data.get("hosts", []):

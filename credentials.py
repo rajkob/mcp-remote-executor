@@ -4,9 +4,13 @@ Fernet-encrypted credential store.
 Credentials are stored in /app/data/credentials as a Fernet-encrypted JSON file.
 Master key is read from the CRED_MASTER_KEY environment variable.
 Plaintext passwords are never written to disk.
+
+In-memory cache: credentials are decrypted once and held in _cache.
+Cache is invalidated whenever credentials are saved or deleted.
 """
 import os
 import json
+import threading
 from pathlib import Path
 from cryptography.fernet import Fernet, InvalidToken
 
@@ -25,16 +29,36 @@ def _get_fernet() -> Fernet:
     return Fernet(key.encode())
 
 
+# ─── In-memory cache ──────────────────────────────────────────────────────────
+_cache: dict | None = None   # None = not yet loaded
+_cache_lock = threading.Lock()
+
+
+def _invalidate() -> None:
+    global _cache
+    with _cache_lock:
+        _cache = None
+
+
 def _load() -> dict:
+    global _cache
+    with _cache_lock:
+        if _cache is not None:
+            return _cache
+
     path = _cred_file()
     if not path.exists() or path.stat().st_size == 0:
+        with _cache_lock:
+            _cache = {}
         return {}
     raw = path.read_bytes()
     if raw == b"{}":
+        with _cache_lock:
+            _cache = {}
         return {}
     try:
         decrypted = _get_fernet().decrypt(raw)
-        return json.loads(decrypted)
+        data = json.loads(decrypted)
     except InvalidToken:
         raise RuntimeError(
             "Failed to decrypt credentials — wrong CRED_MASTER_KEY, or file is corrupt."
@@ -42,15 +66,20 @@ def _load() -> dict:
     except json.JSONDecodeError as e:
         raise RuntimeError(f"Credentials file is corrupt: {e}")
 
+    with _cache_lock:
+        _cache = data
+    return data
+
 
 def _save(data: dict) -> None:
     path = _cred_file()
     path.parent.mkdir(parents=True, exist_ok=True)
     if not data:
         path.write_bytes(b"{}")
-        return
-    encrypted = _get_fernet().encrypt(json.dumps(data).encode())
-    path.write_bytes(encrypted)
+    else:
+        encrypted = _get_fernet().encrypt(json.dumps(data).encode())
+        path.write_bytes(encrypted)
+    _invalidate()  # force reload on next access
 
 
 def save_credential(ip: str, user: str, password: str) -> None:

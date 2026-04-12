@@ -2,37 +2,107 @@
 
 ## Prerequisites
 
-- Windows 10/11 or Linux with Docker Desktop / Docker Engine installed
-- Python 3.9+ installed locally
+- Windows 10/11 or Linux/macOS with **Docker Desktop** / Docker Engine installed
 - VS Code with GitHub Copilot extension (or Claude Desktop / Continue.dev)
+- **Python 3.9+** — only required if using `deploy.py` (not needed for `deploy.sh` / `deploy.ps1`)
 
 ---
 
-## One-Command Deploy
+## Deployment — Choose Your Method
 
-Everything is automated via `deploy.py`. Run it once:
+| Script | Platform | Python needed? |
+|---|---|---|
+| `deploy.py` | Windows / Linux / macOS | ✅ Yes (3.9+) |
+| `deploy.ps1` | Windows (PowerShell) | ❌ No |
+| `deploy.sh` | Linux / macOS (Bash) | ❌ No |
+
+All three scripts do the same thing: check Docker, create data dir, generate encryption key, configure API key auth, build/pull the image, and start the server.
+
+---
+
+## Option A — deploy.ps1 (Windows, no Python)
+
+```powershell
+cd mcp-remote-executor
+.\deploy.ps1
+```
+
+**With dashboard disabled:**
+```powershell
+.\deploy.ps1 -NoDashboard
+```
+
+**Other options:**
+```powershell
+.\deploy.ps1 -Pull        # pull from Docker Hub instead of building
+.\deploy.ps1 -Restart     # restart running container
+.\deploy.ps1 -Status      # check if server is running
+```
+
+> **Note:** If PowerShell blocks execution, run once:
+> ```powershell
+> Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
+> ```
+
+---
+
+## Option B — deploy.sh (Linux / macOS, no Python)
+
+```bash
+cd mcp-remote-executor
+chmod +x deploy.sh
+./deploy.sh
+```
+
+**With dashboard disabled:**
+```bash
+./deploy.sh --no-dashboard
+```
+
+**Other options:**
+```bash
+./deploy.sh --pull        # pull from Docker Hub instead of building
+./deploy.sh --restart     # restart running container
+./deploy.sh --status      # check if server is running
+```
+
+---
+
+## Option C — deploy.py (all platforms, requires Python 3.9+)
 
 ```bash
 cd mcp-remote-executor
 python deploy.py
 ```
 
-That's it. The script handles all steps below automatically.
+### Installing Python (if not installed)
 
----
+**Windows:**
+```powershell
+winget install Python.Python.3.12
+```
+Or download from [python.org/downloads](https://www.python.org/downloads/) — tick **"Add Python to PATH"** during install.
 
-## What `deploy.py` Does (6 steps)
+**Linux (Ubuntu/Debian):**
+```bash
+sudo apt update && sudo apt install -y python3 python3-pip
+```
 
-| Step | Action |
-|---|---|
-| 1 | Checks Docker is installed and running |
-| 2 | Checks/fixes WSL2 mirrored networking in `~/.wslconfig` (Windows only) |
-| 3 | Runs `init.py` — creates `data/`, generates `.env` with encryption key |
-| 4 | **API key setup** — asks whether to enable auth, generates and saves key |
-| 5 | Builds Docker image and starts the container |
-| 6 | Health-checks `http://localhost:8765/sse` and confirms server is up |
+**macOS:**
+```bash
+brew install python3
+```
 
-At the end it prints the full integration guide **with your API key already filled in** and the dashboard URL.
+Verify: `python --version` or `python3 --version` — should show 3.9 or higher.
+
+**deploy.py options:**
+```bash
+python deploy.py                 # full deploy (build from source, with dashboard)
+python deploy.py --no-dashboard  # deploy without web dashboard
+python deploy.py --pull          # use pre-built image from Docker Hub
+python deploy.py --restart       # restart existing container only
+python deploy.py --status        # check if server is running
+```
 
 ---
 
@@ -55,18 +125,35 @@ The dashboard shows a live view of all hosts in `vms.yaml`:
 
 Metrics are collected via SSH and cached for 30 seconds. Click **⟳ Refresh** to force an update.
 
+**API endpoints available at the same server:**
+- `GET /api/status` — JSON metrics for all hosts
+- `GET /api/status?refresh=1` — force-refresh (bypass cache)
+- `GET /api/logs` — last 200 exec.log entries (all hosts)
+- `GET /api/logs/{alias}` — exec.log filtered to one host
+- `GET /api/logs/{alias}?n=50` — last N entries
+
 > **Workflow tip:** Keep the dashboard open in a browser tab for monitoring, and use VS Code Agent mode for AI-assisted troubleshooting & fixes — both connect to the same MCP server.
+
+**To disable the dashboard after deployment:**
+```bash
+# Edit docker-compose.yml: set MCP_DASHBOARD=false
+docker compose restart remote-executor
+```
 
 ---
 
-## Deploy Options
+## What the deploy scripts do (6 steps)
 
-```bash
-python deploy.py              # full deploy (build from source)
-python deploy.py --pull       # use pre-built image from Docker Hub (rajkob/mcp-remote-executor:latest)
-python deploy.py --restart    # restart existing container only
-python deploy.py --status     # check if server is running
-```
+| Step | Action |
+|---|---|
+| 1 | Checks Docker is installed and running |
+| 2 | Checks/fixes WSL2 mirrored networking in `~/.wslconfig` (Windows only) |
+| 3 | Creates `data/`, generates `.env` with Fernet encryption key |
+| 4 | **API key setup** — asks whether to enable auth, generates and saves key |
+| 5 | Builds Docker image (or pulls from Hub) and starts the container |
+| 6 | Health-checks `http://localhost:8765/sse` and confirms server is up |
+
+At the end it prints the full integration guide **with your API key already filled in** and the dashboard URL.
 
 ---
 

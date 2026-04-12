@@ -9,9 +9,11 @@ Routes:
 Mounts alongside the FastMCP SSE app via a simple path router.
 """
 import json
+import hmac
 import os
 from pathlib import Path
 
+import exec_log
 import monitor
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -43,7 +45,7 @@ def _auth_ok(scope) -> bool:
             if param.startswith("api_key="):
                 provided = param[8:]
                 break
-    return provided == API_KEY
+    return provided == API_KEY if not API_KEY else hmac.compare_digest(provided, API_KEY)
 
 
 class DashboardApp:
@@ -70,6 +72,25 @@ class DashboardApp:
             force = "refresh=1" in query
             metrics = monitor.get_all_metrics(force=force)
             await self._send(send, *_json_response(metrics))
+        elif path == "/api/logs" or path.startswith("/api/logs/"):
+            if not _auth_ok(scope):
+                await self._send(send, *_json_response({"error": "unauthorized"}, 401))
+                return
+            # /api/logs          → last 200 entries for all hosts
+            # /api/logs/{alias}  → filtered to one host
+            alias = path[len("/api/logs/"):] or None
+            query = scope.get("query_string", b"").decode()
+            n = 200
+            for param in query.split("&"):
+                if param.startswith("n="):
+                    try:
+                        n = max(1, min(int(param[2:]), 1000))
+                    except ValueError:
+                        pass
+            entries = exec_log.read(n)
+            if alias:
+                entries = [e for e in entries if e.get("alias") == alias]
+            await self._send(send, *_json_response(entries))
         else:
             await self._send(send, *_json_response({"error": "not found"}, 404))
 

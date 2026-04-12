@@ -14,6 +14,7 @@ services:
       - DATA_DIR=/app/data
       - MCP_HOST=0.0.0.0
       - MCP_PORT=8765
+      - MCP_DASHBOARD=true   # set to false to disable the web dashboard
       # Uncomment to enable API key authentication:
       # - MCP_API_KEY=${MCP_API_KEY}
     restart: unless-stopped

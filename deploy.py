@@ -25,6 +25,7 @@ DOCKER_IMAGE = "rajkob/mcp-remote-executor:latest"
 MCP_PORT = 8765
 MCP_HOST = "127.0.0.1"
 MCP_URL = f"http://{MCP_HOST}:{MCP_PORT}/sse"
+DASHBOARD_URL = f"http://{MCP_HOST}:{MCP_PORT}/dashboard"
 
 IS_WINDOWS = platform.system() == "Windows"
 
@@ -425,9 +426,10 @@ Add to ~/.continue/config.json:
 
 def main():
     parser = argparse.ArgumentParser(description="Remote Executor MCP Server — Deploy")
-    parser.add_argument("--pull",    action="store_true", help="Use pre-built Docker Hub image")
-    parser.add_argument("--restart", action="store_true", help="Restart existing container only")
-    parser.add_argument("--status",  action="store_true", help="Check if server is running")
+    parser.add_argument("--pull",         action="store_true", help="Use pre-built Docker Hub image")
+    parser.add_argument("--restart",      action="store_true", help="Restart existing container only")
+    parser.add_argument("--status",       action="store_true", help="Check if server is running")
+    parser.add_argument("--no-dashboard", action="store_true", help="Disable web dashboard UI")
     args = parser.parse_args()
 
     print(f"\n{BOLD}Remote Executor MCP Server — Deployment{RESET}")
@@ -468,6 +470,18 @@ def main():
     if not deploy(use_pull=args.pull):
         print(f"\n{RED}Deployment stopped — see errors above.{RESET}\n")
         sys.exit(1)
+
+    # Dashboard toggle in docker-compose.yml
+    compose_file = BASE_DIR / "docker-compose.yml"
+    if compose_file.exists():
+        dc = compose_file.read_text(encoding="utf-8")
+        if args.no_dashboard:
+            dc = dc.replace("MCP_DASHBOARD=true", "MCP_DASHBOARD=false")
+            warn("Dashboard DISABLED (MCP_DASHBOARD=false). Remove --no-dashboard to enable.")
+        else:
+            dc = dc.replace("MCP_DASHBOARD=false", "MCP_DASHBOARD=true")
+            ok(f"Dashboard ENABLED — http://localhost:{MCP_PORT}/dashboard")
+        compose_file.write_text(dc, encoding="utf-8")
 
     if not health_check(timeout=30):
         print(f"\n{RED}Deployment stopped — see errors above.{RESET}\n")

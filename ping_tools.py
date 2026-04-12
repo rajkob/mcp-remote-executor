@@ -31,6 +31,11 @@ def _ping_one(alias: str, ip: str, count: int = 2, timeout: int = 5) -> dict:
     return {"alias": alias, "ip": ip, "up": up}
 
 
+def ping_host(ip: str) -> dict:
+    """Ping a single IP address directly. Returns {ip, up: bool}."""
+    return _ping_one("", ip)
+
+
 def ping_hosts(aliases: list[str]) -> list[dict]:
     """
     Ping a list of hosts by alias in parallel.
