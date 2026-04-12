@@ -46,29 +46,28 @@ def _load() -> dict:
         if _cache is not None:
             return _cache
 
-    path = _cred_file()
-    if not path.exists() or path.stat().st_size == 0:
-        with _cache_lock:
+        # File read happens inside the lock — prevents two threads from
+        # both seeing _cache=None and double-loading the credential file.
+        path = _cred_file()
+        if not path.exists() or path.stat().st_size == 0:
             _cache = {}
-        return {}
-    raw = path.read_bytes()
-    if raw == b"{}":
-        with _cache_lock:
+            return {}
+        raw = path.read_bytes()
+        if raw == b"{}":
             _cache = {}
-        return {}
-    try:
-        decrypted = _get_fernet().decrypt(raw)
-        data = json.loads(decrypted)
-    except InvalidToken:
-        raise RuntimeError(
-            "Failed to decrypt credentials — wrong CRED_MASTER_KEY, or file is corrupt."
-        )
-    except json.JSONDecodeError as e:
-        raise RuntimeError(f"Credentials file is corrupt: {e}")
+            return {}
+        try:
+            decrypted = _get_fernet().decrypt(raw)
+            data = json.loads(decrypted)
+        except InvalidToken:
+            raise RuntimeError(
+                "Failed to decrypt credentials — wrong CRED_MASTER_KEY, or file is corrupt."
+            )
+        except json.JSONDecodeError as e:
+            raise RuntimeError(f"Credentials file is corrupt: {e}")
 
-    with _cache_lock:
         _cache = data
-    return data
+        return data
 
 
 def _save(data: dict) -> None:

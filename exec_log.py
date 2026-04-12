@@ -4,14 +4,19 @@ Execution log — append / read / clear.
 Every SSH command and file transfer is logged to /app/data/exec.log.
 Format: ISO timestamp | alias | ip:port | user | exit_code | command
 
-Log rotation: the file is automatically trimmed to MAX_LOG_LINES after each
-append, so it never grows without bound.
+Log rotation: the file is trimmed to MAX_LOG_LINES every ROTATE_EVERY writes
+so it never grows without bound, without reading the full file on every append.
 """
 import os
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
 MAX_LOG_LINES = int(os.getenv("MAX_LOG_LINES", "10000"))
+_ROTATE_EVERY = 100   # only run rotation check every N writes
+
+_write_count = 0
+_rotate_lock = threading.Lock()
 
 
 def _log_file() -> Path:
@@ -19,7 +24,9 @@ def _log_file() -> Path:
 
 
 def append(alias: str, ip: str, port: int, user: str, exit_code: int, command: str) -> None:
-    """Append one log entry. Rotates the file if it exceeds MAX_LOG_LINES."""
+    """Append one log entry. Rotates the file every ROTATE_EVERY writes."""
+    global _write_count
+
     path = _log_file()
     path.parent.mkdir(parents=True, exist_ok=True)
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
@@ -27,15 +34,19 @@ def append(alias: str, ip: str, port: int, user: str, exit_code: int, command: s
     with open(path, "a", encoding="utf-8") as f:
         f.write(line)
 
-    # Rotate: keep only the last MAX_LOG_LINES lines
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            lines = f.readlines()
-        if len(lines) > MAX_LOG_LINES:
-            with open(path, "w", encoding="utf-8") as f:
-                f.writelines(lines[-MAX_LOG_LINES:])
-    except OSError:
-        pass  # non-fatal — rotation failed, log still written
+    with _rotate_lock:
+        _write_count += 1
+        do_rotate = (_write_count % _ROTATE_EVERY == 0)
+
+    if do_rotate:
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                lines = f.readlines()
+            if len(lines) > MAX_LOG_LINES:
+                with open(path, "w", encoding="utf-8") as f:
+                    f.writelines(lines[-MAX_LOG_LINES:])
+        except OSError:
+            pass  # non-fatal
 
 
 def read(n: int = 50) -> list[dict]:

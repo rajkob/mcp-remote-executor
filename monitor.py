@@ -97,8 +97,9 @@ def _collect_host(host: dict) -> dict:
         "disk":   "df -h /",
         "uptime": "uptime",
     }
-    combined = " && ".join(
-        f"echo '==={k}===' && {v}" for k, v in commands.items()
+    # Use ';' not '&&' — ensures all sections run even if one command fails
+    combined = " ; ".join(
+        f"echo '==={k}==='; {v}" for k, v in commands.items()
     )
 
     try:

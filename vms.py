@@ -5,9 +5,16 @@ All operations target /app/data/vms.yaml (or DATA_DIR env var).
 Hosts are resolved by alias, project, tag, env label, or zone label.
 """
 import os
+import threading
 import yaml
 from pathlib import Path
 from typing import Any
+
+# ─── mtime-based in-memory cache ─────────────────────────────────────────────
+_vms_cache: dict | None = None
+_vms_mtime: float = 0.0
+_vms_lock = threading.Lock()
+# ─────────────────────────────────────────────────────────────────────────────
 
 
 VMS_SKELETON = """\
@@ -43,22 +50,36 @@ def _vms_file() -> Path:
 
 
 def _load() -> dict:
+    global _vms_cache, _vms_mtime
     path = _vms_file()
-    if not path.exists():
+    try:
+        mtime = path.stat().st_mtime
+    except FileNotFoundError:
         return {"defaults": {"user": "root", "port": 22}, "templates": {}, "projects": {}}
-    with open(path) as f:
-        data = yaml.safe_load(f) or {}
-    data.setdefault("defaults", {"user": "root", "port": 22})
-    data.setdefault("templates", {})
-    data.setdefault("projects", {})
-    return data
+
+    with _vms_lock:
+        if _vms_cache is not None and mtime == _vms_mtime:
+            return _vms_cache
+        with open(path) as f:
+            data = yaml.safe_load(f) or {}
+        data.setdefault("defaults", {"user": "root", "port": 22})
+        data.setdefault("templates", {})
+        data.setdefault("projects", {})
+        _vms_cache = data
+        _vms_mtime = mtime
+        return data
 
 
 def _save(data: dict) -> None:
+    global _vms_cache, _vms_mtime
     path = _vms_file()
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w") as f:
         yaml.dump(data, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
+    # Invalidate cache — next _load() will re-read the newly written file
+    with _vms_lock:
+        _vms_cache = None
+        _vms_mtime = 0.0
 
 
 def _resolve(host: dict, defaults: dict) -> dict:
