@@ -102,6 +102,34 @@
       background: var(--bg); border: 1px solid var(--border); color: var(--text);
       padding: 4px 10px; border-radius: 6px; font-size: 12px; width: 280px;
     }
+
+    /* ── Logs panel ── */
+    #logs-section { padding: 0 24px 32px; }
+    .logs-header {
+      display: flex; justify-content: space-between; align-items: center;
+      margin-bottom: 10px;
+    }
+    .logs-title { font-size: 13px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
+    .select-filter {
+      background: var(--surface); border: 1px solid var(--border); color: var(--text);
+      padding: 4px 10px; border-radius: 6px; font-size: 12px;
+    }
+    #log-table-wrap {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+      overflow-x: auto; max-height: 320px; overflow-y: auto;
+    }
+    #log-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    #log-table th {
+      padding: 8px 12px; text-align: left; color: var(--muted);
+      border-bottom: 1px solid var(--border); white-space: nowrap;
+      position: sticky; top: 0; background: var(--surface); z-index: 1;
+    }
+    #log-table td { padding: 6px 12px; border-bottom: 1px solid rgba(48,54,61,0.5); vertical-align: middle; }
+    #log-table tr:last-child td { border-bottom: none; }
+    #log-table tr:hover td { background: rgba(255,255,255,0.03); }
+    .exit-ok  { color: var(--green); font-weight: 600; }
+    .exit-err { color: var(--red);   font-weight: 600; }
+    .cmd-cell { font-family: monospace; max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   </style>
 </head>
 <body>
@@ -130,6 +158,21 @@
 
 <div id="summary"></div>
 <div id="grid"><div class="loading-placeholder">Loading host metrics…</div></div>
+
+<section id="logs-section">
+  <div class="logs-header">
+    <span class="logs-title">Execution Log</span>
+    <div style="display:flex; gap:8px; align-items:center;">
+      <select id="log-alias-filter" class="select-filter" onchange="loadLogs()">
+        <option value="">All Hosts</option>
+      </select>
+      <button class="btn secondary" onclick="loadLogs()" style="padding:4px 12px;font-size:12px;">⟳ Refresh</button>
+    </div>
+  </div>
+  <div id="log-table-wrap">
+    <div class="loading-placeholder" style="padding:20px">Loading log…</div>
+  </div>
+</section>
 
 <script>
   let autoTimer = null;
@@ -193,6 +236,12 @@
     document.getElementById('grid').innerHTML = hosts.length === 0
       ? '<div class="loading-placeholder">No hosts found in vms.yaml</div>'
       : hosts.map(hostCard).join('');
+
+    // Populate alias filter for log panel
+    const sel = document.getElementById('log-alias-filter');
+    const cur = sel.value;
+    sel.innerHTML = '<option value="">All Hosts</option>' +
+      hosts.map(h => `<option value="${h.alias}"${h.alias === cur ? ' selected' : ''}>${h.alias}</option>`).join('');
   }
 
   function hostCard(h) {
@@ -247,8 +296,60 @@
     else { clearInterval(autoTimer); }
   }
 
+  async function loadLogs() {
+    const alias = document.getElementById('log-alias-filter').value;
+    const key   = apiKey();
+    const headers = key ? { 'X-MCP-Key': key } : {};
+    const url   = alias
+      ? `/api/logs/${encodeURIComponent(alias)}?n=100`
+      : '/api/logs?n=100';
+    try {
+      const res = await fetch(url, { headers });
+      if (!res.ok) {
+        document.getElementById('log-table-wrap').innerHTML =
+          `<div class="loading-placeholder" style="color:var(--red)">Error ${res.status}</div>`;
+        return;
+      }
+      renderLogs(await res.json());
+    } catch (e) {
+      document.getElementById('log-table-wrap').innerHTML =
+        `<div class="loading-placeholder" style="color:var(--red)">Failed: ${e.message}</div>`;
+    }
+  }
+
+  function renderLogs(entries) {
+    if (!entries.length) {
+      document.getElementById('log-table-wrap').innerHTML =
+        '<div class="loading-placeholder" style="padding:20px">No log entries yet.</div>';
+      return;
+    }
+    const rows = entries.slice().reverse().map(e =>
+      `<tr>
+        <td style="color:var(--muted);white-space:nowrap">${e.timestamp}</td>
+        <td style="font-weight:500">${e.alias}</td>
+        <td style="color:var(--muted)">${e.host}</td>
+        <td><span class="${e.exit === '0' ? 'exit-ok' : 'exit-err'}">${e.exit}</span></td>
+        <td class="cmd-cell" title="${escHtml(e.command)}">${escHtml(e.command)}</td>
+      </tr>`
+    ).join('');
+    document.getElementById('log-table-wrap').innerHTML =
+      `<table id="log-table">
+        <thead><tr>
+          <th>Time (UTC)</th><th>Alias</th><th>Host</th><th>Exit</th><th>Command</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>`;
+  }
+
+  function escHtml(s) {
+    return String(s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
   // Initial load
   loadMetrics();
+  loadLogs();
 </script>
 </body>
 </html>

@@ -1,6 +1,24 @@
 # Remote Executor MCP Server
 
-A Dockerized Python MCP server that exposes SSH remote execution tools to any LLM client (VS Code Copilot, Claude Desktop, Continue.dev, etc.).
+[![Docker Pulls](https://img.shields.io/docker/pulls/rajkob/mcp-remote-executor?style=flat-square&logo=docker)](https://hub.docker.com/r/rajkob/mcp-remote-executor)
+[![GitHub Stars](https://img.shields.io/github/stars/rajkob/mcp-remote-executor?style=flat-square&logo=github)](https://github.com/rajkob/mcp-remote-executor)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](LICENSE)
+
+Give AI assistants **SSH access to your remote servers** — run commands, transfer files, monitor metrics, and get live health data, all from natural language in VS Code Copilot, Claude Desktop, or Continue.dev.
+
+🚀 **[→ Quickstart — deploy in 5 minutes](QUICKSTART.md)**
+
+---
+
+## What it does
+
+- **23 MCP tools** — run commands, upload/download files, ping hosts, manage credentials, health check
+- **Web dashboard** — live CPU / memory / disk / uptime for all hosts at `http://localhost:8765/dashboard`
+- **Execution log panel** — recent SSH command history, filterable by host, live in the dashboard
+- **VPN-friendly** — Docker `network_mode: host` — private subnets reachable out of the box
+- **Encrypted credentials** — Fernet (AES-128-CBC + HMAC-SHA256), never plaintext on disk
+- **No Python on host** — deploy with `deploy.ps1` (Windows) or `deploy.sh` (Linux/macOS)
+- **Works with** — VS Code Copilot, Claude Desktop, Continue.dev, any SSE MCP client
 
 ---
 
@@ -145,7 +163,7 @@ Add to `~/.continue/config.json`:
 
 ---
 
-## Tools Reference (22 tools)
+## Tools Reference (23 tools)
 
 | Category | Tool | Description |
 |---|---|---|
@@ -162,6 +180,7 @@ Add to `~/.continue/config.json`:
 | Execution | `upload_file` | Upload file via SFTP |
 | Execution | `download_file` | Download file via SFTP |
 | Connectivity | `ping_hosts` | Ping hosts to check reachability |
+| Connectivity | `health_check` | Full check: ping → SSH → disk/CPU/mem snapshot |
 | Templates | `list_templates` | List command templates |
 | Templates | `expand_template` | Preview template with alias substitution |
 | Templates | `add_template` | Add/update command template |
