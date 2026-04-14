@@ -12,12 +12,12 @@ Give AI assistants **SSH access to your remote servers** — run commands, trans
 
 ## What it does
 
-- **23 MCP tools** — run commands, upload/download files, check reachability, manage credentials, health check
+- **21 MCP tools** — run commands, upload/download files, check reachability, manage credentials, health check
 - **Web dashboard** — live CPU / memory / disk / uptime for all hosts at `http://localhost:8765/dashboard`
 - **Execution log panel** — recent SSH command history, filterable by host, live in the dashboard
 - **VPN-friendly** — Docker `network_mode: host` — private subnets reachable out of the box
 - **Encrypted credentials** — Fernet (AES-128-CBC + HMAC-SHA256), never plaintext on disk
-- **No Python on host** — deploy with `deploy.ps1` (Windows) or `deploy.sh` (Linux/macOS)
+- **No Python on host** — deploy with `deploy.ps1` (Windows), `deploy.sh` (Linux/macOS), or `deploy.py` (cross-platform, supports `--pull` / `--restart` / `--status`)
 - **Works with** — VS Code Copilot, Claude Desktop, Continue.dev, any SSE MCP client
 
 ---
@@ -110,7 +110,7 @@ Add to your **User Settings JSON** (`Ctrl+Shift+P` → "Open User Settings JSON"
 }
 ```
 
-Then in Copilot Chat, switch to **Agent mode** and the 22 remote-executor tools will be available.
+Then in Copilot Chat, switch to **Agent mode** and the 21 remote-executor tools will be available.
 
 ### Claude Desktop
 
@@ -165,7 +165,7 @@ Add to `~/.continue/config.json`:
 
 ---
 
-## Tools Reference (23 tools)
+## Tools Reference (21 tools)
 
 | Category | Tool | Description |
 |---|---|---|
