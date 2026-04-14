@@ -87,11 +87,14 @@ def ssh_exec(alias: str, command: str, timeout: int | None = None,
             stdout = stdout_ch.read().decode(errors="replace")
             stderr = stderr_ch.read().decode(errors="replace")
             exit_code = stdout_ch.channel.recv_exit_status()
-        except (socket.timeout, EOFError):
-            # socket.timeout: channel read timed out
-            # EOFError: paramiko raises this on unexpected channel close / disconnect
+        except socket.timeout:
             raise CommandTimeout(
                 f"Command timed out after {effective_timeout}s on {alias} ({host['ip']})"
+            )
+        except EOFError:
+            # Unexpected channel close — host crashed, SSH daemon killed, etc.
+            raise HostUnreachable(
+                f"Connection lost mid-command on {alias} ({host['ip']})"
             )
     finally:
         client.close()

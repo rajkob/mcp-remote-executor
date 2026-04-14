@@ -151,34 +151,36 @@ def resolve_target(target: str) -> list[dict]:
     """
     Resolve a target string to a list of hosts.
     Tries in order: 'all' > alias > project name > tag > env > zone.
+    Loads vms.yaml exactly once regardless of how many filters are checked.
     Raises HostNotFound if nothing matches.
     """
+    all_hosts = get_all_hosts()  # single _load() + stat() for all branches below
+
     if target.lower() == "all":
-        return get_all_hosts()
+        return all_hosts
 
     # Exact alias
-    try:
-        return [get_host(target)]
-    except HostNotFound:
-        pass
+    exact = [h for h in all_hosts if h.get("alias") == target]
+    if exact:
+        return exact
 
     # Project name
-    data = _load()
-    if target in data.get("projects", {}):
-        return get_hosts_by_project(target)
+    by_project = [h for h in all_hosts if h.get("_project") == target]
+    if by_project:
+        return by_project
 
     # Tag
-    by_tag = get_hosts_by_tag(target)
+    by_tag = [h for h in all_hosts if target in (h.get("tags") or [])]
     if by_tag:
         return by_tag
 
     # Env
-    by_env = get_hosts_by_env(target)
+    by_env = [h for h in all_hosts if h.get("env") == target]
     if by_env:
         return by_env
 
-    # Zone
-    by_zone = get_hosts_by_zone(target)
+    # Zone (case-insensitive)
+    by_zone = [h for h in all_hosts if (h.get("zone") or "").upper() == target.upper()]
     if by_zone:
         return by_zone
 

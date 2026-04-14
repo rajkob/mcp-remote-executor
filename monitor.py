@@ -138,7 +138,14 @@ def get_all_metrics(force: bool = False) -> list[dict]:
     results = []
     to_fetch = []
 
+    current_aliases = {h.get("alias", h.get("ip")) for h in all_hosts}
+
     with _lock:
+        # Evict cache entries for hosts that no longer exist in vms.yaml
+        stale = [a for a in _cache if a not in current_aliases]
+        for a in stale:
+            del _cache[a]
+
         for host in all_hosts:
             alias = host.get("alias", host.get("ip"))
             cached = _cache.get(alias)
