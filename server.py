@@ -18,6 +18,7 @@ import monitor as monitor
 import csv as _csv
 import io as _io
 import json as _json
+import logging as _logging
 import os
 import re
 import hmac
@@ -63,8 +64,8 @@ def _send_webhook(payload: dict) -> None:
             method="POST",
         )
         urllib.request.urlopen(req, timeout=5)
-    except Exception:
-        pass  # webhook failures are non-fatal
+    except Exception as e:
+        _logging.warning("Webhook delivery failed (%s): %s", _WEBHOOK_URL, e)
 
 # ─── API KEY MIDDLEWARE ───────────────────────────────────────────────────────
 
@@ -138,6 +139,8 @@ def add_host(
     key_file: path to SSH private key (only needed when auth=keyFile)
     """
     host_dict: dict = {"alias": alias, "ip": ip, "port": port}
+    if not 1 <= port <= 65535:
+        return f"❌ Invalid port {port} — must be 1–65535."
     if user:
         host_dict["user"] = user
     if env:
@@ -485,6 +488,11 @@ def upload_file(alias: str, local_path: str, remote_path: str) -> str:
     Upload a local file to a remote host via SFTP.
     Auto-logged to exec.log.
     """
+    _lp = Path(local_path)
+    if not _lp.exists():
+        return f"❌ Local file not found: {local_path}"
+    if not _lp.is_file():
+        return f"❌ Not a regular file: {local_path}"
     try:
         r = ssh_tools.sftp_upload(alias, local_path, remote_path)
         return (

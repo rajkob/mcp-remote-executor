@@ -14,6 +14,7 @@ from pathlib import Path
 
 MAX_LOG_LINES = int(os.getenv("MAX_LOG_LINES", "10000"))
 _ROTATE_EVERY = 100   # only run rotation check every N writes
+MAX_COMMAND_LEN = int(os.getenv("MAX_COMMAND_LEN", "500"))  # prevent huge commands bloating the log
 
 _write_count = 0
 _rotate_lock = threading.Lock()
@@ -30,11 +31,12 @@ def append(alias: str, ip: str, port: int, user: str, exit_code: int, command: s
     path = _log_file()
     path.parent.mkdir(parents=True, exist_ok=True)
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
-    line = f"{ts} | {alias} | {ip}:{port} | {user} | {exit_code} | {command}\n"
-    with open(path, "a", encoding="utf-8") as f:
-        f.write(line)
+    cmd_safe = command[:MAX_COMMAND_LEN] + ("..." if len(command) > MAX_COMMAND_LEN else "")
+    line = f"{ts} | {alias} | {ip}:{port} | {user} | {exit_code} | {cmd_safe}\n"
 
     with _rotate_lock:
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(line)
         _write_count += 1
         do_rotate = (_write_count % _ROTATE_EVERY == 0)
 

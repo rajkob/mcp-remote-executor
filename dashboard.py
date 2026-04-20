@@ -24,8 +24,7 @@ API_KEY = os.getenv("MCP_API_KEY", "").strip()
 def _json_response(data, status=200):
     body = json.dumps(data, default=str).encode()
     return status, [(b"content-type", b"application/json"),
-                    (b"content-length", str(len(body)).encode()),
-                    (b"access-control-allow-origin", b"*")], body
+                    (b"content-length", str(len(body)).encode())], body
 
 
 def _html_response(html: str, status=200):

@@ -23,6 +23,7 @@ import vms
 
 _pool: dict[tuple, paramiko.SSHClient] = {}
 _pool_lock = threading.Lock()
+_MAX_POOL_SIZE = int(os.getenv("MAX_POOL_SIZE", "50"))  # cap to prevent unbounded growth
 
 
 def _pool_key(host: dict) -> tuple:
@@ -46,6 +47,14 @@ def _get_pooled(host: dict) -> paramiko.SSHClient | None:
 def _store_pooled(host: dict, client: paramiko.SSHClient) -> None:
     key = _pool_key(host)
     with _pool_lock:
+        if len(_pool) >= _MAX_POOL_SIZE:
+            # FIFO eviction: close and remove the oldest entry
+            oldest_key = next(iter(_pool))
+            try:
+                _pool[oldest_key].close()
+            except Exception:
+                pass
+            del _pool[oldest_key]
         _pool[key] = client
 
 
@@ -219,7 +228,12 @@ def ssh_exec(alias: str, command: str, timeout: int | None = None,
                     # socket.timeout: paramiko channel-level read timeout
                     stdout_ch.channel.close()
                     with _pool_lock:
-                        _pool.pop(_pool_key(host), None)
+                        evicted = _pool.pop(_pool_key(host), None)
+                    if evicted:
+                        try:
+                            evicted.close()  # release the SSH socket
+                        except Exception:
+                            pass
                     raise CommandTimeout(
                         f"Command timed out after {effective_timeout}s on {alias} ({host['ip']})"
                     )

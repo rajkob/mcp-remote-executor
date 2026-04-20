@@ -5,6 +5,7 @@ All operations target /app/data/vms.yaml (or DATA_DIR env var).
 Hosts are resolved by alias, project, tag, env label, or zone label.
 """
 import os
+import re
 import threading
 import yaml
 from pathlib import Path
@@ -13,8 +14,9 @@ from typing import Any
 # ─── mtime-based in-memory cache ─────────────────────────────────────────────
 _vms_cache: dict | None = None
 _vms_mtime: float = 0.0
-_vms_lock = threading.Lock()
-# ─────────────────────────────────────────────────────────────────────────────
+_vms_lock = threading.Lock()# ─── Write serialisation lock ────────────────────────────────────────────────
+# Prevents lost-update races when two threads write vms.yaml concurrently.
+_write_lock = threading.Lock()# ─────────────────────────────────────────────────────────────────────────────
 
 
 VMS_SKELETON = """\
@@ -188,47 +190,56 @@ def resolve_target(target: str) -> list[dict]:
 
 
 def write_host(project: str, host_dict: dict) -> None:
-    """Append a new host to the given project. Raises DuplicateAlias."""
-    data = _load()
-    alias = host_dict.get("alias")
+    """Append a new host to the given project. Raises DuplicateAlias or ValueError."""
+    alias = (host_dict.get("alias") or "").strip()
+    ip = (host_dict.get("ip") or "").strip()
 
-    for proj_data in data.get("projects", {}).values():
-        for h in proj_data.get("hosts", []):
-            if h.get("alias") == alias:
-                raise DuplicateAlias(f"Alias '{alias}' already exists in vms.yaml")
+    if not alias or not ip:
+        raise ValueError("alias and ip are required")
+    if not re.match(r"^[A-Za-z0-9_.:-]+$", alias):
+        raise ValueError(f"alias '{alias}' contains invalid characters (allowed: A-Z a-z 0-9 _ . : -)")
 
-    data["projects"].setdefault(project, {"hosts": []})
-    data["projects"][project].setdefault("hosts", [])
-    clean = {k: v for k, v in host_dict.items() if not k.startswith("_") and v is not None}
-    data["projects"][project]["hosts"].append(clean)
-    _save(data)
+    with _write_lock:
+        data = _load()
+        for proj_data in data.get("projects", {}).values():
+            for h in proj_data.get("hosts", []):
+                if h.get("alias") == alias:
+                    raise DuplicateAlias(f"Alias '{alias}' already exists in vms.yaml")
+
+        data["projects"].setdefault(project, {"hosts": []})
+        data["projects"][project].setdefault("hosts", [])
+        clean = {k: v for k, v in host_dict.items() if not k.startswith("_") and v is not None}
+        data["projects"][project]["hosts"].append(clean)
+        _save(data)
 
 
 def delete_host(alias: str) -> str:
     """Remove host by alias. Returns project name it was in."""
-    data = _load()
-    for project, proj_data in data.get("projects", {}).items():
-        hosts = proj_data.get("hosts", [])
-        for i, h in enumerate(hosts):
-            if h.get("alias") == alias:
-                hosts.pop(i)
-                _save(data)
-                return project
+    with _write_lock:
+        data = _load()
+        for project, proj_data in data.get("projects", {}).items():
+            hosts = proj_data.get("hosts", [])
+            for i, h in enumerate(hosts):
+                if h.get("alias") == alias:
+                    hosts.pop(i)
+                    _save(data)
+                    return project
     raise HostNotFound(f"Host '{alias}' not found")
 
 
 def update_host(alias: str, field: str, value: Any) -> None:
     """Update a single field of an existing host in vms.yaml."""
-    data = _load()
-    for proj_data in data.get("projects", {}).values():
-        for host in proj_data.get("hosts", []):
-            if host.get("alias") == alias:
-                if value is None and field in host:
-                    del host[field]
-                else:
-                    host[field] = value
-                _save(data)
-                return
+    with _write_lock:
+        data = _load()
+        for proj_data in data.get("projects", {}).values():
+            for host in proj_data.get("hosts", []):
+                if host.get("alias") == alias:
+                    if value is None and field in host:
+                        del host[field]
+                    else:
+                        host[field] = value
+                    _save(data)
+                    return
     raise HostNotFound(f"Host '{alias}' not found")
 
 
@@ -237,17 +248,19 @@ def load_templates() -> dict:
 
 
 def write_template(name: str, command: str) -> None:
-    data = _load()
-    data["templates"][name] = command
-    _save(data)
+    with _write_lock:
+        data = _load()
+        data["templates"][name] = command
+        _save(data)
 
 
 def delete_template(name: str) -> None:
-    data = _load()
-    if name not in data.get("templates", {}):
-        raise KeyError(f"Template '{name}' not found")
-    del data["templates"][name]
-    _save(data)
+    with _write_lock:
+        data = _load()
+        if name not in data.get("templates", {}):
+            raise KeyError(f"Template '{name}' not found")
+        del data["templates"][name]
+        _save(data)
 
 
 def expand_template(name: str, alias: str) -> str:
@@ -278,22 +291,42 @@ def expand_template(name: str, alias: str) -> str:
 
 def write_hosts_bulk(entries: list[tuple]) -> dict:
     """
-    Write multiple hosts in one operation.
+    Write multiple hosts in a single read-modify-write operation.
     entries: list of (project: str, host_dict: dict)
     Returns {"added": [alias, ...], "skipped": [{"alias": ..., "reason": ...}, ...]}
     """
-    added = []
-    skipped = []
-    for project, host_dict in entries:
-        try:
-            write_host(project, host_dict)
-            added.append(host_dict.get("alias", "?"))
-        except DuplicateAlias:
-            skipped.append({"alias": host_dict.get("alias", "?"),
-                            "reason": "duplicate alias"})
-        except Exception as exc:
-            skipped.append({"alias": host_dict.get("alias", "?"),
-                            "reason": str(exc)})
+    added: list[str] = []
+    skipped: list[dict] = []
+
+    with _write_lock:
+        data = _load()
+        for project, host_dict in entries:
+            alias = (host_dict.get("alias") or "").strip()
+            ip = (host_dict.get("ip") or "").strip()
+            if not alias or not ip:
+                skipped.append({"alias": alias or "?", "reason": "alias and ip are required"})
+                continue
+            if not re.match(r"^[A-Za-z0-9_.:-]+$", alias):
+                skipped.append({"alias": alias, "reason": "alias contains invalid characters"})
+                continue
+            duplicate = any(
+                h.get("alias") == alias
+                for pd in data.get("projects", {}).values()
+                for h in pd.get("hosts", [])
+            )
+            if duplicate:
+                skipped.append({"alias": alias, "reason": "duplicate alias"})
+                continue
+            data["projects"].setdefault(project, {"hosts": []})
+            data["projects"][project].setdefault("hosts", [])
+            clean = {k: v for k, v in host_dict.items()
+                     if not k.startswith("_") and v is not None}
+            data["projects"][project]["hosts"].append(clean)
+            added.append(alias)
+
+        if added:
+            _save(data)
+
     return {"added": added, "skipped": skipped}
 
 

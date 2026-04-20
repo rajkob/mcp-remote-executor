@@ -133,15 +133,21 @@ class TestFileTransfer(unittest.TestCase):
         self._tmp.cleanup()
 
     def test_upload_success(self):
-        with patch("server.ssh_tools.sftp_upload",
+        with patch("server.Path") as mock_path_cls, \
+             patch("server.ssh_tools.sftp_upload",
                    return_value={"bytes_transferred": 1024, "elapsed_s": 0.3}):
+            mock_path_cls.return_value.exists.return_value = True
+            mock_path_cls.return_value.is_file.return_value = True
             result = server.upload_file("web01", "/local/f.txt", "/remote/f.txt")
         self.assertIn("1,024", result)
         self.assertIn("web01", result)
 
     def test_upload_failure(self):
-        with patch("server.ssh_tools.sftp_upload",
+        with patch("server.Path") as mock_path_cls, \
+             patch("server.ssh_tools.sftp_upload",
                    side_effect=Exception("connection refused")):
+            mock_path_cls.return_value.exists.return_value = True
+            mock_path_cls.return_value.is_file.return_value = True
             result = server.upload_file("web01", "/local/f.txt", "/remote/f.txt")
         self.assertIn("❌", result)
 

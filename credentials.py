@@ -41,6 +41,11 @@ def _get_fernet() -> Fernet:
 _cache: dict | None = None   # None = not yet loaded
 _cache_lock = threading.Lock()
 
+# ─── Write serialisation lock ────────────────────────────────────────────────
+# Prevents lost-update race: two threads calling save_credential concurrently
+# could both _load() the same snapshot and one would silently overwrite the other.
+_write_lock = threading.Lock()
+
 
 def _invalidate() -> None:
     global _cache
@@ -91,9 +96,10 @@ def _save(data: dict) -> None:
 
 def save_credential(ip: str, user: str, password: str) -> None:
     """Encrypt and store a password for ip|user."""
-    data = _load()
-    data[f"{ip}|{user}"] = password
-    _save(data)
+    with _write_lock:
+        data = _load()
+        data[f"{ip}|{user}"] = password
+        _save(data)
 
 
 def get_credential(ip: str, user: str) -> str | None:
@@ -104,13 +110,14 @@ def get_credential(ip: str, user: str) -> str | None:
 
 def delete_credential(ip: str, user: str) -> bool:
     """Delete stored credential. Returns True if it existed."""
-    data = _load()
-    key = f"{ip}|{user}"
-    if key not in data:
-        return False
-    del data[key]
-    _save(data)
-    return True
+    with _write_lock:
+        data = _load()
+        key = f"{ip}|{user}"
+        if key not in data:
+            return False
+        del data[key]
+        _save(data)
+        return True
 
 
 def credential_exists(ip: str, user: str) -> bool:
