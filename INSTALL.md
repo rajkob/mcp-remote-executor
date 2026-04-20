@@ -142,6 +142,12 @@ docker compose restart remote-executor
 
 ---
 
+## Tools
+
+The server exposes **23 MCP tools** once connected. See the [Tools Reference in README.md](README.md#tools-reference-23-tools) for the full list.
+
+---
+
 ## What the deploy scripts do (6 steps)
 
 | Step | Action |

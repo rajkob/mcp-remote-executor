@@ -23,10 +23,12 @@ def _parse_cpu(raw: str) -> float | None:
     """Parse idle% from 'top -bn1' output and return used%."""
     for line in raw.splitlines():
         if "Cpu(s)" in line or "cpu" in line.lower():
-            for part in line.replace(",", " ").split():
+            parts = line.replace(",", " ").split()
+            for i, part in enumerate(parts):
                 try:
                     val = float(part)
-                    if "id" in line[line.find(part):line.find(part) + 20]:
+                    # idle field is labelled 'id' in the token immediately after the value
+                    if i + 1 < len(parts) and parts[i + 1].rstrip(",").lower() == "id":
                         return round(100 - val, 1)
                 except ValueError:
                     continue

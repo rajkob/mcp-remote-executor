@@ -418,6 +418,10 @@ Add to ~/.continue/config.json:
 {BOLD}── Test VPN/SSH connectivity ──{RESET}
   docker compose run --rm -it remote-executor \\
     python test_connectivity.py <ip> <user>
+
+{BOLD}── Optional: AI / Ollama integration ──{RESET}
+  Enables ai_analyze and ollama_status tools.
+  See LOCAL_LLM_SETUP.md for setup instructions.
 """)
     print("=" * w)
 
