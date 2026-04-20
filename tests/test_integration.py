@@ -21,7 +21,7 @@ os.environ["DATA_DIR"] = _tmp
 import server  # noqa: E402  must come after env setup
 
 EXPECTED_TOOLS = {
-    "list_hosts", "add_host", "remove_host", "update_host",
+    "list_hosts", "add_host", "remove_host", "update_host", "import_hosts",
     "save_credential", "check_credential", "delete_credential", "audit_credentials",
     "run_command", "run_command_multi", "upload_file", "download_file",
     "ping_hosts", "health_check",
@@ -41,12 +41,12 @@ class TestServerImport(unittest.TestCase):
         self.assertEqual(server.mcp.name, "remote-executor")
 
     def test_tool_count(self):
-        """Exactly 23 tools must be registered — update EXPECTED_TOOLS if new tools are added."""
+        """Exactly 24 tools must be registered — update EXPECTED_TOOLS if new tools are added."""
         tools = asyncio.run(server.mcp.list_tools())
         self.assertEqual(
             len(tools),
-            23,
-            f"Expected 23 tools, found {len(tools)}: {[t.name for t in tools]}",
+            24,
+            f"Expected 24 tools, found {len(tools)}: {[t.name for t in tools]}",
         )
 
     def test_expected_tool_names(self):

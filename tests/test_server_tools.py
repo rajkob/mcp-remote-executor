@@ -439,5 +439,168 @@ class TestRunCommandDestructiveGuard(unittest.TestCase):
         self.assertIn("1 success", result)
 
 
+# ── Phase 2: import_hosts ─────────────────────────────────────────────────────
+
+class TestImportHosts(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        _setup_vms(self._tmp.name)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    # --- CSV ------------------------------------------------------------------
+
+    def test_csv_imports_valid_rows(self):
+        csv_content = (
+            "project,alias,ip,port,user,env,zone\n"
+            "CORE,srv01,10.0.1.1,22,ubuntu,staging,LAN\n"
+            "CORE,srv02,10.0.1.2,22,ubuntu,staging,LAN\n"
+        )
+        result = server.import_hosts("csv", csv_content)
+        self.assertIn("srv01", result)
+        self.assertIn("srv02", result)
+        self.assertIn("Added (2)", result)
+
+    def test_csv_skips_duplicate_alias(self):
+        csv_content = (
+            "project,alias,ip\n"
+            "CORE,web01,10.0.0.99\n"  # web01 already exists from _setup_vms
+        )
+        result = server.import_hosts("csv", csv_content)
+        self.assertIn("Skipped (1)", result)
+        self.assertIn("web01", result)
+
+    def test_csv_reports_parse_error_on_missing_required(self):
+        csv_content = "project,ip\nCORE,10.0.0.5\n"  # no alias column
+        result = server.import_hosts("csv", csv_content)
+        self.assertIn("❌", result)
+
+    def test_csv_invalid_port_reports_error(self):
+        csv_content = "project,alias,ip,port\nCORE,bad01,10.0.0.5,notanumber\n"
+        result = server.import_hosts("csv", csv_content)
+        self.assertIn("invalid port", result)
+
+    def test_csv_tags_parsed_as_list(self):
+        csv_content = (
+            "project,alias,ip,tags\n"
+            "CORE,tagged01,10.0.0.7,\"kubernetes,web\"\n"
+        )
+        server.import_hosts("csv", csv_content)
+        import vms as vms_mod
+        host = vms_mod.get_host("tagged01")
+        self.assertIn("kubernetes", host.get("tags", []))
+
+    # --- JSON -----------------------------------------------------------------
+
+    def test_json_imports_valid_items(self):
+        import json
+        payload = json.dumps([
+            {"project": "DB", "alias": "db01", "ip": "10.0.2.1", "user": "postgres"},
+            {"project": "DB", "alias": "db02", "ip": "10.0.2.2"},
+        ])
+        result = server.import_hosts("json", payload)
+        self.assertIn("db01", result)
+        self.assertIn("db02", result)
+        self.assertIn("Added (2)", result)
+
+    def test_json_skips_item_missing_required_fields(self):
+        import json
+        payload = json.dumps([
+            {"alias": "noproj", "ip": "10.0.0.9"},   # no project
+        ])
+        result = server.import_hosts("json", payload)
+        self.assertIn("❌", result)
+
+    def test_json_not_array_returns_error(self):
+        import json
+        result = server.import_hosts("json", json.dumps({"alias": "x", "ip": "1.1.1.1"}))
+        self.assertIn("❌", result)
+        self.assertIn("array", result)
+
+    def test_json_malformed_returns_error(self):
+        result = server.import_hosts("json", "{not valid json")
+        self.assertIn("JSON parse error", result)
+
+    # --- General --------------------------------------------------------------
+
+    def test_unsupported_format_returns_error(self):
+        result = server.import_hosts("xml", "<hosts/>")
+        self.assertIn("❌", result)
+        self.assertIn("Unsupported format", result)
+
+    def test_empty_csv_returns_warning(self):
+        result = server.import_hosts("csv", "project,alias,ip\n")  # header only, no rows
+        self.assertIn("No hosts found", result)
+
+
+# ── Phase 2: webhook notifications ───────────────────────────────────────────
+
+class TestWebhookNotifications(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        _setup_vms(self._tmp.name)
+        # Ensure WEBHOOK_URL is set for tests that verify it fires
+        os.environ["WEBHOOK_URL"] = "http://webhook.test/hook"
+        server._WEBHOOK_URL = "http://webhook.test/hook"
+
+    def tearDown(self):
+        self._tmp.cleanup()
+        os.environ.pop("WEBHOOK_URL", None)
+        server._WEBHOOK_URL = ""
+
+    def test_webhook_fired_on_nonzero_exit(self):
+        r = {"alias": "web01", "ip": "10.0.0.1", "exit_code": 1,
+             "stdout": "", "stderr": "error\n", "elapsed_s": 0.1}
+        with patch("server.ssh_tools.ssh_exec", return_value=r):
+            with patch("server._send_webhook") as mock_wh:
+                server.run_command("web01", "badcmd")
+        mock_wh.assert_called_once()
+        payload = mock_wh.call_args[0][0]
+        self.assertEqual(payload["event"], "command_failed")
+        self.assertEqual(payload["alias"], "web01")
+        self.assertEqual(payload["exit_code"], 1)
+
+    def test_webhook_not_fired_on_success(self):
+        r = {"alias": "web01", "ip": "10.0.0.1", "exit_code": 0,
+             "stdout": "ok\n", "stderr": "", "elapsed_s": 0.1}
+        with patch("server.ssh_tools.ssh_exec", return_value=r):
+            with patch("server._send_webhook") as mock_wh:
+                server.run_command("web01", "df -h")
+        mock_wh.assert_not_called()
+
+    def test_webhook_fired_for_down_host_in_ping(self):
+        down = [{"alias": "web01", "ip": "10.0.0.1", "port": 22, "up": False}]
+        with patch("server.ping_tools.ping_hosts", return_value=down):
+            with patch("server.ping_tools.format_ping_results", return_value="table"):
+                with patch("server._send_webhook") as mock_wh:
+                    server.ping_hosts("all")
+        mock_wh.assert_called_once()
+        payload = mock_wh.call_args[0][0]
+        self.assertEqual(payload["event"], "host_down")
+        self.assertEqual(payload["alias"], "web01")
+
+    def test_webhook_not_fired_for_up_hosts(self):
+        up = [{"alias": "web01", "ip": "10.0.0.1", "port": 22, "up": True}]
+        with patch("server.ping_tools.ping_hosts", return_value=up):
+            with patch("server.ping_tools.format_ping_results", return_value="table"):
+                with patch("server._send_webhook") as mock_wh:
+                    server.ping_hosts("all")
+        mock_wh.assert_not_called()
+
+    def test_send_webhook_skipped_when_url_empty(self):
+        server._WEBHOOK_URL = ""
+        with patch("urllib.request.urlopen") as mock_open:
+            server._send_webhook({"event": "test"})
+        mock_open.assert_not_called()
+
+    def test_send_webhook_silent_on_http_error(self):
+        import urllib.error
+        with patch("urllib.request.urlopen",
+                   side_effect=urllib.error.URLError("connection refused")):
+            # Must not raise
+            server._send_webhook({"event": "test"})
+
+
 if __name__ == "__main__":
     unittest.main()

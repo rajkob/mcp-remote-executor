@@ -5,7 +5,7 @@ Exposes SSH remote execution tools via FastMCP (HTTP/SSE transport).
 Connect clients to: http://localhost:8765/sse
 
 Tools are grouped by category:
-  Host management  — list_hosts, add_host, remove_host, update_host
+  Host management  — list_hosts, add_host, remove_host, update_host, import_hosts
   Credentials      — save_credential, check_credential, delete_credential, audit_credentials
   Execution        — run_command, run_command_multi, upload_file, download_file
   Connectivity     — ping_hosts, health_check
@@ -13,6 +13,8 @@ Tools are grouped by category:
   Log              — read_exec_log, clear_exec_log, save_output
   AI (optional)    — ai_analyze, ollama_status  (require Ollama running locally)
 """
+import csv as _csv
+import io as _io
 import json as _json
 import os
 import re
@@ -38,6 +40,29 @@ _INSTRUCTIONS = _PROMPT_FILE.read_text(encoding="utf-8") if _PROMPT_FILE.exists(
 
 mcp = FastMCP("remote-executor", instructions=_INSTRUCTIONS)
 
+# ─── WEBHOOK ────────────────────────────────────────────────────────────────────────
+
+_WEBHOOK_URL = os.getenv("WEBHOOK_URL", "").strip()
+
+
+def _send_webhook(payload: dict) -> None:
+    """
+    POST a JSON payload to WEBHOOK_URL. Fails silently so webhook issues
+    never block the caller. Skipped when WEBHOOK_URL is not set.
+    """
+    if not _WEBHOOK_URL:
+        return
+    try:
+        data = _json.dumps(payload).encode()
+        req = urllib.request.Request(
+            _WEBHOOK_URL,
+            data=data,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        urllib.request.urlopen(req, timeout=5)
+    except Exception:
+        pass  # webhook failures are non-fatal
 
 # ─── API KEY MIDDLEWARE ───────────────────────────────────────────────────────
 
@@ -170,6 +195,99 @@ def update_host(alias: str, field: str, value: str) -> str:
         return f"❌ Invalid value for field '{field}': {e}"
 
 
+@mcp.tool()
+def import_hosts(format: str, content: str) -> str:
+    """
+    Bulk import hosts from CSV or JSON content.
+
+    format: 'csv' or 'json'
+
+    CSV — header row required, columns:
+      project,alias,ip,port,user,env,zone,tags,auth
+      (port/user/env/zone/tags/auth are optional — defaults applied)
+
+    JSON — array of host objects, each with at minimum 'project', 'alias', 'ip':
+      [{"project":"CORE","alias":"web01","ip":"10.0.0.1","port":22,...}, ...]
+
+    tags: comma-separated string in CSV, array in JSON.
+    Returns a summary of added vs skipped (duplicate alias) hosts.
+    """
+    entries: list[tuple] = []
+    errors: list[str] = []
+
+    fmt = format.strip().lower()
+
+    if fmt == "csv":
+        try:
+            reader = _csv.DictReader(_io.StringIO(content))
+            required = {"project", "alias", "ip"}
+            for i, row in enumerate(reader, start=2):
+                missing = required - set(row.keys())
+                if missing:
+                    errors.append(f"Row {i}: missing columns {missing}")
+                    continue
+                alias = row.get("alias", "").strip()
+                ip = row.get("ip", "").strip()
+                project = row.get("project", "").strip()
+                if not alias or not ip or not project:
+                    errors.append(f"Row {i}: alias/ip/project must not be empty")
+                    continue
+                host: dict = {"alias": alias, "ip": ip}
+                if row.get("port", "").strip():
+                    try:
+                        host["port"] = int(row["port"])
+                    except ValueError:
+                        errors.append(f"Row {i} ({alias}): invalid port '{row['port']}'")
+                        continue
+                for field in ("user", "env", "zone", "auth"):
+                    if row.get(field, "").strip():
+                        host[field] = row[field].strip()
+                if row.get("tags", "").strip():
+                    host["tags"] = [t.strip() for t in row["tags"].split(",") if t.strip()]
+                entries.append((project, host))
+        except Exception as exc:
+            return f"❌ CSV parse error: {exc}"
+
+    elif fmt == "json":
+        try:
+            items = _json.loads(content)
+            if not isinstance(items, list):
+                return "❌ JSON must be an array of host objects."
+            for i, item in enumerate(items):
+                project = item.get("project", "").strip()
+                alias = item.get("alias", "").strip()
+                ip = item.get("ip", "").strip()
+                if not project or not alias or not ip:
+                    errors.append(f"Item {i}: 'project', 'alias', and 'ip' are required")
+                    continue
+                host = {k: v for k, v in item.items() if k != "project"}
+                entries.append((project, host))
+        except _json.JSONDecodeError as exc:
+            return f"❌ JSON parse error: {exc}"
+
+    else:
+        return "❌ Unsupported format. Use 'csv' or 'json'."
+
+    if not entries and not errors:
+        return "⚠️ No hosts found in the provided content."
+
+    result = vms.write_hosts_bulk(entries)
+    added = result["added"]
+    skipped = result["skipped"]
+
+    lines = [f"**Import complete** — {fmt.upper()}\n"]
+    lines.append(f"✅ Added ({len(added)}): {', '.join(added) if added else 'none'}")
+    if skipped:
+        lines.append(f"⏭ Skipped ({len(skipped)}):")
+        for s in skipped:
+            lines.append(f"  - `{s['alias']}`: {s['reason']}")
+    if errors:
+        lines.append(f"❌ Parse errors ({len(errors)}):")
+        for e in errors:
+            lines.append(f"  - {e}")
+    return "\n".join(lines)
+
+
 # ─── CREDENTIAL MANAGEMENT ────────────────────────────────────────────────────
 
 @mcp.tool()
@@ -275,7 +393,18 @@ def run_command(alias: str, command: str, force: bool = False) -> str:
             lines.append(r["stdout"].rstrip())
         if r.get("stderr"):
             lines.append(f"[stderr] {r['stderr'].rstrip()}")
-        return "\n".join(lines)
+        output = "\n".join(lines)
+        # Fire webhook on non-zero exit
+        if r["exit_code"] != 0:
+            _send_webhook({
+                "event": "command_failed",
+                "alias": alias,
+                "ip": r.get("ip", ""),
+                "command": command,
+                "exit_code": r["exit_code"],
+                "stderr": r.get("stderr", "")[:500],
+            })
+        return output
     except ssh_tools.DestructiveCommandBlocked as e:
         return f"🚫 {e}"
     except ssh_tools.CredentialNotFound as e:
@@ -399,6 +528,15 @@ def ping_hosts(target: str = "all") -> str:
 
     aliases = [h["alias"] for h in hosts]
     results = ping_tools.ping_hosts(aliases)
+    # Fire webhook for every DOWN host
+    for r in results:
+        if not r.get("up"):
+            _send_webhook({
+                "event": "host_down",
+                "alias": r.get("alias", ""),
+                "ip": r.get("ip", ""),
+                "port": r.get("port", 22),
+            })
     return ping_tools.format_ping_results(results)
 
 
@@ -419,7 +557,8 @@ def list_templates() -> str:
 @mcp.tool()
 def expand_template(name: str, alias: str) -> str:
     """
-    Expand a template command string with {{alias}} substitution.
+    Expand a template command string, substituting host field placeholders.
+    Supported: {{alias}}, {{ip}}, {{user}}, {{env}}, {{zone}}, {{port}}
     Use this to preview the resolved command before running it.
     """
     try:

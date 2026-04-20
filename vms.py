@@ -251,11 +251,50 @@ def delete_template(name: str) -> None:
 
 
 def expand_template(name: str, alias: str) -> str:
-    """Resolve template command with {{alias}} substitution."""
+    """
+    Resolve template command with host field substitution.
+    Supported placeholders: {{alias}}, {{ip}}, {{user}}, {{env}}, {{zone}}, {{port}}
+    """
     templates = load_templates()
     if name not in templates:
         raise KeyError(f"Template '{name}' not found")
-    return templates[name].replace("{{alias}}", alias)
+    try:
+        host = get_host(alias)
+    except HostNotFound:
+        host = {}
+    subs = {
+        "alias": alias,
+        "ip":    host.get("ip", alias),
+        "user":  host.get("user", "root"),
+        "env":   host.get("env", ""),
+        "zone":  host.get("zone", ""),
+        "port":  str(host.get("port", 22)),
+    }
+    cmd = templates[name]
+    for key, val in subs.items():
+        cmd = cmd.replace(f"{{{{{key}}}}}", val)
+    return cmd
+
+
+def write_hosts_bulk(entries: list[tuple]) -> dict:
+    """
+    Write multiple hosts in one operation.
+    entries: list of (project: str, host_dict: dict)
+    Returns {"added": [alias, ...], "skipped": [{"alias": ..., "reason": ...}, ...]}
+    """
+    added = []
+    skipped = []
+    for project, host_dict in entries:
+        try:
+            write_host(project, host_dict)
+            added.append(host_dict.get("alias", "?"))
+        except DuplicateAlias:
+            skipped.append({"alias": host_dict.get("alias", "?"),
+                            "reason": "duplicate alias"})
+        except Exception as exc:
+            skipped.append({"alias": host_dict.get("alias", "?"),
+                            "reason": str(exc)})
+    return {"added": added, "skipped": skipped}
 
 
 def format_hosts_table() -> str:

@@ -184,5 +184,107 @@ class TestTemplates(unittest.TestCase):
             vms.delete_template("ghost-template")
 
 
+# ── TestExpandTemplateVars ────────────────────────────────────────────────────
+
+class TestExpandTemplateVars(unittest.TestCase):
+    """Tests for extended {{ip}}, {{user}}, {{env}}, {{zone}}, {{port}} substitution."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        _temp_vms(self._tmp.name)
+        vms.write_host("K8S", {
+            "alias": "master",
+            "ip": "10.0.0.5",
+            "port": 2222,
+            "user": "deploy",
+            "env": "production",
+            "zone": "DMZ",
+        })
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_alias_substitution(self):
+        vms.write_template("drain", "kubectl drain {{alias}} --force")
+        self.assertEqual(vms.expand_template("drain", "master"),
+                         "kubectl drain master --force")
+
+    def test_ip_substitution(self):
+        vms.write_template("ssh-ip", "ssh {{user}}@{{ip}} -p {{port}}")
+        result = vms.expand_template("ssh-ip", "master")
+        self.assertIn("10.0.0.5", result)
+        self.assertIn("deploy", result)
+        self.assertIn("2222", result)
+
+    def test_env_substitution(self):
+        vms.write_template("cfg", "cat /etc/{{env}}/config.yaml")
+        result = vms.expand_template("cfg", "master")
+        self.assertIn("production", result)
+        self.assertNotIn("{{env}}", result)
+
+    def test_zone_substitution(self):
+        vms.write_template("fw", "ufw allow from {{zone}}")
+        result = vms.expand_template("fw", "master")
+        self.assertIn("DMZ", result)
+
+    def test_all_vars_in_one_template(self):
+        vms.write_template("full", "{{alias}} {{ip}} {{port}} {{user}} {{env}} {{zone}}")
+        result = vms.expand_template("full", "master")
+        self.assertEqual(result, "master 10.0.0.5 2222 deploy production DMZ")
+
+    def test_unknown_alias_falls_back_gracefully(self):
+        vms.write_template("disk", "df -h  # {{alias}}")
+        # alias that doesn't exist — falls back to alias string for {{alias}},
+        # empty string for host-specific fields
+        result = vms.expand_template("disk", "ghost")
+        self.assertIn("ghost", result)
+
+    def test_no_placeholders_unchanged(self):
+        vms.write_template("plain", "df -h")
+        self.assertEqual(vms.expand_template("plain", "master"), "df -h")
+
+    def test_missing_template_raises_key_error(self):
+        with self.assertRaises(KeyError):
+            vms.expand_template("nonexistent", "master")
+
+
+# ── TestWriteHostsBulk ────────────────────────────────────────────────────────
+
+class TestWriteHostsBulk(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        _temp_vms(self._tmp.name)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_bulk_adds_all_hosts(self):
+        entries = [
+            ("WEB", {"alias": "web01", "ip": "10.0.0.1"}),
+            ("WEB", {"alias": "web02", "ip": "10.0.0.2"}),
+            ("DB",  {"alias": "db01",  "ip": "10.0.0.3"}),
+        ]
+        result = vms.write_hosts_bulk(entries)
+        self.assertEqual(sorted(result["added"]), ["db01", "web01", "web02"])
+        self.assertEqual(result["skipped"], [])
+
+    def test_bulk_skips_duplicates(self):
+        vms.write_host("WEB", {"alias": "web01", "ip": "10.0.0.1"})
+        entries = [
+            ("WEB", {"alias": "web01", "ip": "10.0.0.9"}),  # duplicate
+            ("WEB", {"alias": "web02", "ip": "10.0.0.2"}),
+        ]
+        result = vms.write_hosts_bulk(entries)
+        self.assertIn("web02", result["added"])
+        self.assertEqual(len(result["skipped"]), 1)
+        self.assertEqual(result["skipped"][0]["alias"], "web01")
+        self.assertIn("duplicate", result["skipped"][0]["reason"])
+
+    def test_bulk_empty_list(self):
+        result = vms.write_hosts_bulk([])
+        self.assertEqual(result["added"], [])
+        self.assertEqual(result["skipped"], [])
+
+
 if __name__ == "__main__":
     unittest.main()
