@@ -8,13 +8,16 @@ Tools are grouped by category:
   Host management  — list_hosts, add_host, remove_host, update_host
   Credentials      — save_credential, check_credential, delete_credential, audit_credentials
   Execution        — run_command, run_command_multi, upload_file, download_file
-  Connectivity     — ping_hosts
+  Connectivity     — ping_hosts, health_check
   Templates        — list_templates, expand_template, add_template, remove_template
   Log              — read_exec_log, clear_exec_log, save_output
+  AI (optional)    — ai_analyze, ollama_status  (require Ollama running locally)
 """
+import json as _json
 import os
 import re
 import hmac
+import urllib.request
 from datetime import datetime
 from pathlib import Path
 from typing import Literal
@@ -527,6 +530,143 @@ def health_check(alias: str) -> str:
         lines.append(f"| SSH   | ❌ {e} |")
 
     return "\n".join(lines)
+
+
+# ─── OLLAMA / LOCAL LLM ───────────────────────────────────────────────────────
+
+_OLLAMA_URL   = os.getenv("OLLAMA_URL",   "http://host.docker.internal:11434")
+_OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:7b")
+
+
+def _ollama_available() -> bool:
+    """Return True if Ollama is reachable at OLLAMA_URL."""
+    try:
+        urllib.request.urlopen(f"{_OLLAMA_URL}/api/tags", timeout=2)
+        return True
+    except Exception:
+        return False
+
+
+def _ollama_chat(prompt: str, system: str = "") -> str:
+    """Send a chat message to the local Ollama model and return the response text."""
+    payload = _json.dumps({
+        "model": _OLLAMA_MODEL,
+        "messages": [
+            {"role": "system", "content": system or "You are an expert DevOps/AIOps assistant."},
+            {"role": "user",   "content": prompt},
+        ],
+        "stream": False,
+        "options": {"temperature": 0.1, "num_ctx": 4096},
+    }).encode()
+    req = urllib.request.Request(
+        f"{_OLLAMA_URL}/api/chat",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=120) as resp:
+        result = _json.loads(resp.read())
+    return result["message"]["content"].strip()
+
+
+@mcp.tool()
+def ai_analyze(alias: str, question: str) -> str:
+    """
+    Run a diagnostic command on a remote host then use the local Ollama LLM to analyze the output.
+    Examples: 'analyze disk usage on web01', 'explain errors in logs on db01'.
+    Requires Ollama running at OLLAMA_URL (default: http://host.docker.internal:11434).
+    Set OLLAMA_URL and OLLAMA_MODEL in docker-compose.yml to configure.
+    """
+    if not _ollama_available():
+        return (
+            f"❌ Ollama not reachable at {_OLLAMA_URL}\n"
+            "Start Ollama on the host machine: `ollama serve`\n"
+            "Then ensure OLLAMA_URL=http://host.docker.internal:11434 in docker-compose.yml"
+        )
+
+    q = question.lower()
+    if any(w in q for w in ["disk", "space", "storage"]):
+        command = "df -h && du -sh /* 2>/dev/null | sort -rh | head -20"
+    elif any(w in q for w in ["memory", "mem", "ram"]):
+        command = "free -m && ps aux --sort=-%mem | head -15"
+    elif any(w in q for w in ["cpu", "load", "process"]):
+        command = "uptime && ps aux --sort=-%cpu | head -15"
+    elif any(w in q for w in ["log", "error", "fail"]):
+        command = "journalctl -n 100 --no-pager -p err 2>/dev/null || tail -100 /var/log/syslog 2>/dev/null"
+    elif any(w in q for w in ["network", "connection", "port"]):
+        command = "ss -tulnp"
+    elif any(w in q for w in ["service", "systemd", "running"]):
+        command = "systemctl --failed"
+    else:
+        command = "uptime && free -m && df -h && ps aux --sort=-%cpu | head -10"
+
+    try:
+        r = ssh_tools.ssh_exec(alias, command)
+    except ssh_tools.CredentialNotFound as e:
+        return f"❌ {e}"
+    except ssh_tools.HostUnreachable as e:
+        return f"⚠️ {e}"
+    except vms.HostNotFound as e:
+        return f"❌ {e}"
+    except Exception as e:
+        return f"❌ SSH failed: {e}"
+
+    raw_output = (r.get("stdout") or "") + (r.get("stderr") or "")
+    if not raw_output.strip():
+        return f"⚠️ No output from '{alias}' for command: {command}"
+
+    system_prompt = (
+        "You are an expert Linux sysadmin and AIOps engineer. "
+        "Analyze the system output and answer the question concisely. "
+        "Highlight any issues and suggest actionable fixes."
+    )
+    user_prompt = (
+        f"Host: {alias} ({r.get('ip', '?')})\n"
+        f"Question: {question}\n\n"
+        f"Command: {command}\n\n"
+        f"Output:\n{raw_output[:3000]}"
+    )
+
+    try:
+        analysis = _ollama_chat(user_prompt, system_prompt)
+    except Exception as e:
+        return f"❌ Ollama analysis failed: {e}\n\nRaw output:\n{raw_output}"
+
+    return (
+        f"## 🤖 AI Analysis: `{alias}`\n"
+        f"**Question:** {question}\n"
+        f"**Command:** `{command}`\n\n"
+        f"### Analysis\n{analysis}\n\n"
+        f"---\n"
+        f"*Model: {_OLLAMA_MODEL} @ {_OLLAMA_URL}*"
+    )
+
+
+@mcp.tool()
+def ollama_status() -> str:
+    """Check if the local Ollama LLM is running and show which models are loaded in VRAM."""
+    if not _ollama_available():
+        return (
+            f"❌ Ollama not reachable at {_OLLAMA_URL}\n"
+            "Start with: `ollama serve` on the host machine."
+        )
+    try:
+        with urllib.request.urlopen(f"{_OLLAMA_URL}/api/ps", timeout=5) as resp:
+            data = _json.loads(resp.read())
+        models = data.get("models", [])
+        if not models:
+            return (
+                f"✅ Ollama running at {_OLLAMA_URL}\n"
+                f"⚠️  No models loaded in VRAM (idle)\n"
+                f"Configured model: `{_OLLAMA_MODEL}`"
+            )
+        lines = [f"✅ Ollama running — {len(models)} model(s) in VRAM:\n"]
+        for m in models:
+            vram_gb = round(m.get("size", 0) / 1e9, 1)
+            lines.append(f"- `{m['name']}` — {vram_gb} GB VRAM")
+        return "\n".join(lines)
+    except Exception as e:
+        return f"⚠️ Ollama running but status check failed: {e}"
 
 
 # ─── ENTRYPOINT ───────────────────────────────────────────────────────────────
