@@ -135,7 +135,9 @@ Ollama keeps models loaded in VRAM even when idle. Use these scripts to free you
 
 ### PowerShell Scripts
 
-Create these files in your project root or a convenient scripts folder:
+Create these files in your project root. They are **not included in the repo** — copy the code blocks below and save them manually:
+
+> 💡 Tip: Save them as `ollama-start.ps1`, `ollama-stop.ps1`, and `ollama-status.ps1` in the `mcp-remote-executor` folder so they're next to `deploy.ps1`.
 
 **`ollama-start.ps1`**
 ```powershell
@@ -183,13 +185,16 @@ nvidia-smi --query-gpu=name,memory.used,memory.free,memory.total --format=csv,no
 
 ### Auto-Unload After Idle (Recommended)
 
-Add to your `.env` file to make Ollama automatically free VRAM after a period of inactivity:
+Set `OLLAMA_KEEP_ALIVE` as a **host shell / system environment variable** (not in `.env` — that file is for the Docker container, not Ollama):
 
-```ini
-# Ollama auto-unloads model from VRAM after this period of inactivity
-# Set to 0 to unload immediately after each request (maximum VRAM savings)
-# Set to -1 to keep loaded forever (maximum speed)
-OLLAMA_KEEP_ALIVE=10m
+```powershell
+# PowerShell — set for current session
+$env:OLLAMA_KEEP_ALIVE = "10m"
+ollama serve
+
+# Or set permanently in Windows System Environment Variables:
+# System Properties → Advanced → Environment Variables → New User Variable
+# Name: OLLAMA_KEEP_ALIVE   Value: 10m
 ```
 
 Recommended values by workflow:
@@ -430,14 +435,17 @@ ollama run mcp-executor
 
 Add the following to `server.py` to give your MCP server two new tools: `ai_analyze` (runs a command on a remote host and uses the local LLM to analyze the output) and `ollama_status` (checks if Ollama is running and what is loaded in VRAM).
 
-### Add to `.env`
+> **Note:** Adding these tools increases the total MCP tool count from **21 → 23**. Update your README and release notes accordingly if you publish this change.
+
+### Add to `.env` (Docker container vars)
 
 ```ini
-# Local LLM integration
-OLLAMA_URL=http://localhost:11434
+# Local LLM integration — read by server.py inside the container
+OLLAMA_URL=http://host.docker.internal:11434
 OLLAMA_MODEL=qwen2.5:7b
-OLLAMA_KEEP_ALIVE=10m
 ```
+
+> **Note:** `OLLAMA_KEEP_ALIVE` is an Ollama host process variable — set it in your Windows system environment or PowerShell session, **not** in `.env`. See Section 5 for details.
 
 ### Add to `server.py`
 
@@ -735,7 +743,8 @@ ollama ps
 
 ```powershell
 # Free VRAM when done with AI work
-.\ollama-stop.ps1
+.\
+ollama-stop.ps1
 
 # Stop MCP server if not needed
 docker compose down
@@ -751,7 +760,7 @@ docker compose down
 | **Data privacy** | Sent to GitHub | Stays on machine |
 | **VRAM used** | 0 (cloud) | ~5GB |
 | **Best for** | Dev & testing | Ops & VPN work |
-| **MCP tools** | ✅ All 21 tools | ✅ All 21 tools |
+| **MCP tools** | ✅ 21 tools (+ 2 optional AI tools if Section 9 applied) | ✅ 21 tools (+ 2 optional AI tools if Section 9 applied) |
 
 ---
 
@@ -761,7 +770,7 @@ docker compose down
 
 | Problem | Cause | Fix |
 |---|---|---|
-| `connection refused` at `:11434` | Ollama not started | Run `ollama serve` or `.ollama-start.ps1` |
+| `connection refused` at `:11434` | Ollama not started | Run `ollama serve` or `.\ollama-start.ps1` |
 | Model loads slowly | Not pre-warmed | Run `ollama run qwen2.5:7b "ready"` first |
 | VRAM overflow / OOM | Model too large | Use Q4_K_M quantization, reduce `num_ctx` |
 | Wrong GPU used | Multi-GPU system | Set `CUDA_VISIBLE_DEVICES=0` |
