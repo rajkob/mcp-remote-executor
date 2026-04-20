@@ -98,7 +98,7 @@ def add_host(
     user: str = "",
     env: str = "",
     zone: str = "",
-    tags: list[str] = [],
+    tags: list[str] | None = None,
     auth: Literal["credential-manager", "keyFile", "prompt"] = "prompt",
     key_file: str = "",
 ) -> str:
