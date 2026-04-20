@@ -182,5 +182,176 @@ class TestMonitorCache(unittest.TestCase):
             self.assertNotIn("ghost", monitor._cache)
 
 
+# ── TestWatchSet ──────────────────────────────────────────────────────────────
+
+class TestWatchSet(unittest.TestCase):
+    def setUp(self):
+        monitor.watch_clear()
+
+    def tearDown(self):
+        monitor.watch_clear()
+
+    def test_add_and_list(self):
+        monitor.watch_add(["web01", "db01"])
+        self.assertEqual(monitor.list_watched(), ["db01", "web01"])
+
+    def test_remove_one(self):
+        monitor.watch_add(["web01", "db01", "cache01"])
+        monitor.watch_remove(["db01"])
+        self.assertNotIn("db01", monitor.list_watched())
+        self.assertIn("web01", monitor.list_watched())
+
+    def test_remove_nonexistent_is_safe(self):
+        monitor.watch_add(["web01"])
+        monitor.watch_remove(["ghost"])  # must not raise
+        self.assertIn("web01", monitor.list_watched())
+
+    def test_clear_empties_set(self):
+        monitor.watch_add(["web01", "db01"])
+        monitor.watch_clear()
+        self.assertEqual(monitor.list_watched(), [])
+
+    def test_add_duplicates_deduped(self):
+        monitor.watch_add(["web01"])
+        monitor.watch_add(["web01"])
+        self.assertEqual(monitor.list_watched().count("web01"), 1)
+
+    def test_empty_watch_set_by_default(self):
+        self.assertEqual(monitor.list_watched(), [])
+
+
+# ── TestGetWatchedMetrics ─────────────────────────────────────────────────────
+
+class TestGetWatchedMetrics(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        os.environ["DATA_DIR"] = self._tmp.name
+        import vms
+        vms._vms_cache = None
+        vms._vms_mtime = 0.0
+        vms.init_empty()
+        vms.write_host("CORE", {"alias": "web01", "ip": "10.0.0.1", "port": 22})
+        vms.write_host("CORE", {"alias": "db01",  "ip": "10.0.0.2", "port": 22})
+        with monitor._lock:
+            monitor._cache.clear()
+        monitor.watch_clear()
+
+    def tearDown(self):
+        monitor.watch_clear()
+        self._tmp.cleanup()
+
+    def _fake_metric(self, alias, ip):
+        return {"alias": alias, "ip": ip, "project": "CORE",
+                "status": "ok", "cpu_pct": 5.0, "mem": None,
+                "disk": None, "uptime": None, "env": "", "zone": "", "error": None}
+
+    def test_returns_empty_when_nothing_watched(self):
+        with patch.object(monitor, "_collect_host") as mock_collect:
+            result = monitor.get_watched_metrics()
+        mock_collect.assert_not_called()
+        self.assertEqual(result, [])
+
+    def test_returns_only_watched_hosts(self):
+        monitor.watch_add(["web01"])
+        fakes = {
+            "web01": self._fake_metric("web01", "10.0.0.1"),
+            "db01":  self._fake_metric("db01",  "10.0.0.2"),
+        }
+        with patch.object(monitor, "_collect_host", side_effect=lambda h: fakes[h["alias"]]):
+            result = monitor.get_watched_metrics()
+        aliases = [r["alias"] for r in result]
+        self.assertIn("web01", aliases)
+        self.assertNotIn("db01", aliases)
+
+    def test_adding_second_host_expands_results(self):
+        monitor.watch_add(["web01", "db01"])
+        fake = self._fake_metric("web01", "10.0.0.1")
+        fake2 = self._fake_metric("db01", "10.0.0.2")
+        with patch.object(monitor, "_collect_host", side_effect=lambda h: self._fake_metric(h["alias"], h["ip"])):
+            result = monitor.get_watched_metrics()
+        self.assertEqual(len(result), 2)
+
+    def test_stop_watch_removes_from_results(self):
+        monitor.watch_add(["web01", "db01"])
+        monitor.watch_remove(["db01"])
+        with patch.object(monitor, "_collect_host", side_effect=lambda h: self._fake_metric(h["alias"], h["ip"])):
+            result = monitor.get_watched_metrics()
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["alias"], "web01")
+
+    def test_fetch_for_aliases_does_not_modify_watch_set(self):
+        monitor._fetch_for_aliases({"web01"})
+        self.assertEqual(monitor.list_watched(), [])
+
+
+# ── TestOnDemandMCPTools ──────────────────────────────────────────────────────
+
+class TestOnDemandMCPTools(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        os.environ["DATA_DIR"] = self._tmp.name
+        import vms
+        vms._vms_cache = None
+        vms._vms_mtime = 0.0
+        vms.init_empty()
+        vms.write_host("CORE", {"alias": "web01", "ip": "10.0.0.1", "port": 22})
+        with monitor._lock:
+            monitor._cache.clear()
+        monitor.watch_clear()
+
+        import server
+        self._server = server
+
+    def tearDown(self):
+        monitor.watch_clear()
+        self._tmp.cleanup()
+
+    def _fake(self, alias="web01"):
+        return {"alias": alias, "ip": "10.0.0.1", "project": "CORE",
+                "status": "ok", "cpu_pct": 10.0,
+                "mem": {"pct": 50.0, "total_mb": 8000, "used_mb": 4000, "free_mb": 4000},
+                "disk": {"size": "50G", "used": "20G", "avail": "30G", "pct": "40%"},
+                "uptime": "2 days", "env": "", "zone": "", "error": None}
+
+    def test_start_monitoring_adds_to_watch_set(self):
+        with patch.object(monitor, "_fetch_for_aliases", return_value=[self._fake()]):
+            self._server.start_monitoring("web01")
+        self.assertIn("web01", monitor.list_watched())
+
+    def test_start_monitoring_unknown_target_returns_error(self):
+        result = self._server.start_monitoring("ghost_project_xyz")
+        self.assertIn("❌", result)
+        self.assertEqual(monitor.list_watched(), [])
+
+    def test_start_monitoring_returns_snapshot_table(self):
+        with patch.object(monitor, "_fetch_for_aliases", return_value=[self._fake()]):
+            result = self._server.start_monitoring("web01")
+        self.assertIn("web01", result)
+        self.assertIn("ok", result)
+
+    def test_stop_monitoring_removes_from_watch_set(self):
+        monitor.watch_add(["web01"])
+        self._server.stop_monitoring("web01")
+        self.assertNotIn("web01", monitor.list_watched())
+
+    def test_stop_monitoring_all_clears_everything(self):
+        monitor.watch_add(["web01"])
+        result = self._server.stop_monitoring("all")
+        self.assertEqual(monitor.list_watched(), [])
+        self.assertIn("Stopped", result)
+
+    def test_monitoring_status_when_empty(self):
+        result = self._server.monitoring_status()
+        self.assertIn("No hosts", result)
+        self.assertIn("start_monitoring", result)
+
+    def test_monitoring_status_shows_watched_hosts(self):
+        monitor.watch_add(["web01"])
+        with patch.object(monitor, "get_watched_metrics", return_value=[self._fake()]):
+            result = self._server.monitoring_status()
+        self.assertIn("web01", result)
+        self.assertIn("ok", result)
+
+
 if __name__ == "__main__":
     unittest.main()

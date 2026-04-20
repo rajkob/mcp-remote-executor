@@ -179,3 +179,93 @@ def _flatten_hosts() -> list[dict]:
             h["_project"] = project
             hosts.append(h)
     return hosts
+
+
+def _flatten_hosts_for(aliases: set) -> list[dict]:
+    """Flatten vms.yaml → only hosts whose alias is in *aliases*."""
+    inventory = vms.load_hosts()
+    hosts = []
+    for project, proj_data in inventory.get("projects", {}).items():
+        for host in proj_data.get("hosts", []):
+            if host.get("alias") in aliases:
+                h = dict(host)
+                h["_project"] = project
+                hosts.append(h)
+    return hosts
+
+
+# ── Watch set (on-demand monitoring) ─────────────────────────────────────────
+
+_watch_set: set = set()   # aliases currently being actively monitored
+_watch_lock = threading.Lock()
+
+
+def watch_add(aliases: list) -> None:
+    """Add aliases to the active monitoring watch set."""
+    with _watch_lock:
+        _watch_set.update(aliases)
+
+
+def watch_remove(aliases: list) -> None:
+    """Remove aliases from the active monitoring watch set."""
+    with _watch_lock:
+        for a in aliases:
+            _watch_set.discard(a)
+
+
+def watch_clear() -> None:
+    """Stop all active monitoring (clear the watch set and evict cache)."""
+    with _watch_lock:
+        _watch_set.clear()
+
+
+def list_watched() -> list:
+    """Return a sorted list of currently watched aliases."""
+    with _watch_lock:
+        return sorted(_watch_set)
+
+
+def _fetch_for_aliases(aliases: set, force: bool = False) -> list[dict]:
+    """
+    Collect metrics for a specific set of aliases.
+    Respects the cache; updates cache entries on fetch.
+    Does NOT modify _watch_set.
+    """
+    if not aliases:
+        return []
+
+    to_fetch_hosts = _flatten_hosts_for(aliases)
+    now = time.time()
+    results = []
+    to_fetch = []
+
+    with _lock:
+        for host in to_fetch_hosts:
+            alias = host.get("alias", host.get("ip"))
+            cached = _cache.get(alias)
+            if cached and not force and (now - cached["ts"]) < CACHE_TTL:
+                results.append(cached["data"])
+            else:
+                to_fetch.append(host)
+
+    if to_fetch:
+        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
+            futures = {pool.submit(_collect_host, h): h for h in to_fetch}
+            for future in as_completed(futures):
+                data = future.result()
+                alias = data["alias"]
+                with _lock:
+                    _cache[alias] = {"ts": now, "data": data}
+                results.append(data)
+
+    return sorted(results, key=lambda h: (h["project"], h["alias"]))
+
+
+def get_watched_metrics(force: bool = False) -> list[dict]:
+    """
+    Return metrics ONLY for hosts in the active watch set.
+    Returns an empty list when nothing is being monitored (default state).
+    """
+    with _watch_lock:
+        aliases = set(_watch_set)
+    return _fetch_for_aliases(aliases, force=force)

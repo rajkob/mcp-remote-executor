@@ -69,7 +69,7 @@ class DashboardApp:
                 return
             qs = parse_qs(scope.get("query_string", b"").decode())
             force = qs.get("refresh", ["0"])[0] == "1"
-            metrics = monitor.get_all_metrics(force=force)
+            metrics = monitor.get_watched_metrics(force=force)
             await self._send(send, *_json_response(metrics))
         elif path == "/api/logs" or path.startswith("/api/logs/"):
             if not _auth_ok(scope):

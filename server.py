@@ -9,10 +9,12 @@ Tools are grouped by category:
   Credentials      — save_credential, check_credential, delete_credential, audit_credentials
   Execution        — run_command, run_command_multi, upload_file, download_file
   Connectivity     — ping_hosts, health_check
+  Monitoring       — start_monitoring, stop_monitoring, monitoring_status
   Templates        — list_templates, expand_template, add_template, remove_template
   Log              — read_exec_log, clear_exec_log, save_output, command_history, export_exec_log
   AI (optional)    — ai_analyze, ollama_status  (require Ollama running locally)
 """
+import monitor as monitor
 import csv as _csv
 import io as _io
 import json as _json
@@ -722,6 +724,91 @@ def health_check(alias: str) -> str:
     except Exception as e:
         lines.append(f"| SSH   | ❌ {e} |")
 
+    return "\n".join(lines)
+
+
+# ─── ON-DEMAND MONITORING ─────────────────────────────────────────────────────
+
+@mcp.tool()
+def start_monitoring(target: str) -> str:
+    """
+    Start monitoring hosts matching target (alias, project, env, zone, tag, or 'all').
+    Adds matching hosts to the active watch list — the dashboard /api/status and
+    monitoring_status() will then show live metrics for those hosts only.
+    Monitoring is OFF by default; call this to activate it for a specific scope.
+    Examples: 'web01', 'PROJECT_CORE', 'env:production', 'tag:postgres', 'all'
+    """
+    try:
+        hosts = vms.resolve_target(target)
+    except Exception as exc:
+        return f"❌ {exc}"
+
+    aliases = [h["alias"] for h in hosts]
+    monitor.watch_add(aliases)
+    results = monitor._fetch_for_aliases(set(aliases))
+
+    lines = [f"✓ Now monitoring **{len(aliases)}** host(s): {', '.join(sorted(aliases))}\n"]
+    lines.append("| Alias | Status | CPU% | Mem% | Disk |")
+    lines.append("|---|---|---|---|---|")
+    for r in results:
+        cpu = f"{r['cpu_pct']}%" if r.get("cpu_pct") is not None else "—"
+        mem = f"{r['mem']['pct']}%" if r.get("mem") else "—"
+        disk = r["disk"]["pct"] if r.get("disk") else "—"
+        lines.append(f"| {r['alias']} | {r['status']} | {cpu} | {mem} | {disk} |")
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def stop_monitoring(target: str) -> str:
+    """
+    Stop monitoring hosts matching target.
+    Use 'all' to stop all active monitoring at once.
+    Examples: 'web01', 'PROJECT_CORE', 'all'
+    """
+    if target.strip().lower() == "all":
+        count = len(monitor.list_watched())
+        monitor.watch_clear()
+        return f"✓ Stopped monitoring all {count} host(s). Watch list is now empty."
+
+    try:
+        hosts = vms.resolve_target(target)
+    except Exception as exc:
+        return f"❌ {exc}"
+
+    aliases = [h["alias"] for h in hosts]
+    monitor.watch_remove(aliases)
+    remaining = monitor.list_watched()
+    rem_str = f"{len(remaining)} host(s) still watched" if remaining else "nothing being monitored"
+    return f"✓ Stopped monitoring: {', '.join(sorted(aliases))}. {rem_str}."
+
+
+@mcp.tool()
+def monitoring_status() -> str:
+    """
+    Show the current monitoring watch list and last known metrics for each watched host.
+    Returns a message if no monitoring is active.
+    """
+    watched = monitor.list_watched()
+    if not watched:
+        return (
+            "No hosts are currently being monitored.\n"
+            "Use `start_monitoring(<target>)` to begin — target can be an alias, "
+            "project name, env, zone, tag, or 'all'."
+        )
+
+    results = monitor.get_watched_metrics()
+    lines = [f"**Active monitoring — {len(watched)} host(s)**\n"]
+    lines.append("| Alias | Project | Status | CPU% | Mem% | Disk | Uptime |")
+    lines.append("|---|---|---|---|---|---|---|")
+    for r in results:
+        cpu = f"{r['cpu_pct']}%" if r.get("cpu_pct") is not None else "—"
+        mem = f"{r['mem']['pct']}%" if r.get("mem") else "—"
+        disk = r["disk"]["pct"] if r.get("disk") else "—"
+        uptime = r.get("uptime") or "—"
+        lines.append(
+            f"| {r['alias']} | {r['project']} | {r['status']} "
+            f"| {cpu} | {mem} | {disk} | {uptime} |"
+        )
     return "\n".join(lines)
 
 

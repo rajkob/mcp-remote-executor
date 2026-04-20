@@ -25,6 +25,7 @@ EXPECTED_TOOLS = {
     "save_credential", "check_credential", "delete_credential", "audit_credentials",
     "run_command", "run_command_multi", "upload_file", "download_file",
     "ping_hosts", "health_check",
+    "start_monitoring", "stop_monitoring", "monitoring_status",
     "list_templates", "expand_template", "add_template", "remove_template",
     "read_exec_log", "clear_exec_log", "save_output",
     "command_history", "export_exec_log",
@@ -46,8 +47,8 @@ class TestServerImport(unittest.TestCase):
         tools = asyncio.run(server.mcp.list_tools())
         self.assertEqual(
             len(tools),
-            26,
-            f"Expected 26 tools, found {len(tools)}: {[t.name for t in tools]}",
+            29,
+            f"Expected 29 tools, found {len(tools)}: {[t.name for t in tools]}",
         )
 
     def test_expected_tool_names(self):
