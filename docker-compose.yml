@@ -19,4 +19,7 @@ services:
       - MCP_DASHBOARD=true   # set to false to disable the web dashboard
       # Uncomment to enable API key authentication:
       # - MCP_API_KEY=${MCP_API_KEY}
+      # Uncomment to enable local Ollama LLM integration (see LOCAL_LLM_SETUP.md):
+      # - OLLAMA_URL=http://host.docker.internal:11434
+      # - OLLAMA_MODEL=qwen2.5:7b
     restart: unless-stopped
