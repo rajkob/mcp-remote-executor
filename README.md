@@ -12,7 +12,7 @@ Give AI assistants **SSH access to your remote servers** — run commands, trans
 
 ## What it does
 
-- **21 MCP tools** — run commands, upload/download files, check reachability, manage credentials, health check
+- **23 MCP tools** — run commands, upload/download files, check reachability, manage credentials, health check; optional AI-assisted analysis via local Ollama
 - **Web dashboard** — live CPU / memory / disk / uptime for all hosts at `http://localhost:8765/dashboard`
 - **Execution log panel** — recent SSH command history, filterable by host, live in the dashboard
 - **VPN-friendly** — Docker `network_mode: host` — private subnets reachable out of the box
@@ -110,7 +110,7 @@ Add to your **User Settings JSON** (`Ctrl+Shift+P` → "Open User Settings JSON"
 }
 ```
 
-Then in Copilot Chat, switch to **Agent mode** and the 21 remote-executor tools will be available.
+Then in Copilot Chat, switch to **Agent mode** and the 23 remote-executor tools will be available.
 
 ### Claude Desktop
 
@@ -165,7 +165,7 @@ Add to `~/.continue/config.json`:
 
 ---
 
-## Tools Reference (21 tools)
+## Tools Reference (23 tools)
 
 | Category | Tool | Description |
 |---|---|---|
@@ -190,6 +190,8 @@ Add to `~/.continue/config.json`:
 | Log | `read_exec_log` | Show last N execution log entries |
 | Log | `clear_exec_log` | Clear execution log |
 | Log | `save_output` | Save command output to timestamped file |
+| AI | `ai_analyze` | SSH into a host, run diagnostics, analyse output with a local Ollama model |
+| AI | `ollama_status` | Check which Ollama models are loaded in VRAM and GPU memory usage |
 
 ---
 

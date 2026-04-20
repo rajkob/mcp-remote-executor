@@ -262,5 +262,9 @@ ${BOLD}── Useful Docker commands ──${RESET}
   docker compose restart remote-executor   # restart
   docker compose down                      # stop
   docker compose up -d                     # start
+
+${BOLD}── Optional: AI / Ollama integration ──${RESET}
+  Enables ai_analyze and ollama_status tools.
+  See LOCAL_LLM_SETUP.md for setup instructions.
 "
 echo "${SEP}"

@@ -320,5 +320,9 @@ Add to %APPDATA%\Claude\claude_desktop_config.json:
   docker compose restart remote-executor   # restart
   docker compose down                      # stop
   docker compose up -d                     # start
+
+`e[1m── Optional: AI / Ollama integration ──`e[0m
+  Enables ai_analyze and ollama_status tools.
+  See LOCAL_LLM_SETUP.md for setup instructions.
 "@
 Write-Host $sep

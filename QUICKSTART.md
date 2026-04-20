@@ -72,6 +72,7 @@ Test it:
 Check disk usage on web01
 Ping all hosts
 Health check web01
+Analyse disk usage on web01   (requires local Ollama — see LOCAL_LLM_SETUP.md)
 ```
 
 ---
