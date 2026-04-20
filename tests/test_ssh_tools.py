@@ -46,6 +46,10 @@ def _host(alias="web01", ip="10.0.0.1", port=22, user="root"):
 # ── _connect ──────────────────────────────────────────────────────────────────
 
 class TestConnect(unittest.TestCase):
+    def setUp(self):
+        # Always start with an empty pool so mock SSHClients are used fresh.
+        ssh_tools.close_all_connections()
+
     def test_credential_not_found_raises(self):
         host = _host()
         with patch("credentials.get_credential", return_value=None):
@@ -157,19 +161,22 @@ class TestSshExec(unittest.TestCase):
             with self.assertRaises(ssh_tools.HostUnreachable):
                 ssh_tools.ssh_exec("web01", "uptime", _log=False)
 
-    def test_client_closed_on_success(self):
+    def test_connection_kept_open_on_success(self):
+        # With connection pooling, the client is NOT closed after a successful call.
         client = _make_paramiko_client()
         with patch.object(ssh_tools, "_connect", return_value=client):
             with patch("exec_log.append"):
-                ssh_tools.ssh_exec("web01", "uptime")
-        client.close.assert_called()
+                result = ssh_tools.ssh_exec("web01", "uptime")
+        client.close.assert_not_called()
+        self.assertEqual(result["exit_code"], 0)
 
-    def test_client_closed_on_error(self):
+    def test_connection_not_closed_on_error(self):
+        # Pool eviction (not close) happens on transport errors handled upstream.
         client = _make_paramiko_client(read_side_effect=EOFError())
         with patch.object(ssh_tools, "_connect", return_value=client):
             with self.assertRaises(ssh_tools.HostUnreachable):
                 ssh_tools.ssh_exec("web01", "uptime", _log=False)
-        client.close.assert_called()
+        client.close.assert_not_called()
 
 
 # ── ssh_exec_multi ────────────────────────────────────────────────────────────

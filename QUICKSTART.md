@@ -18,6 +18,16 @@ cd mcp-remote-executor
 chmod +x deploy.sh && ./deploy.sh
 ```
 
+**Or run the Python deploy script directly (any platform):**
+```bash
+python deploy.py              # full deploy
+python deploy.py --pull       # pull pre-built image from Docker Hub instead of local build
+python deploy.py --restart    # restart the existing container only
+python deploy.py --status     # check if the server is running
+python deploy.py --reset-key  # regenerate the API key without a full redeploy
+python deploy.py --version    # print version and exit
+```
+
 The script will:
 - Create `data/` and generate an encryption key
 - Ask if you want API key auth (press **Y** — recommended)
@@ -72,6 +82,7 @@ Test it:
 Check disk usage on web01
 Ping all hosts
 Health check web01
+Run "df -h" on all hosts in parallel
 Analyse disk usage on web01   (requires local Ollama — see LOCAL_LLM_SETUP.md)
 ```
 
@@ -97,6 +108,18 @@ Live CPU / memory / disk for all hosts. Auto-refreshes every 30 seconds.
 | Credentials (encrypted) | `data/credentials` |
 | Execution log | `data/exec.log` |
 | Env / API key | `.env` |
+
+### Available MCP tools (23)
+
+| Category | Tools |
+|---|---|
+| Host management | `list_hosts`, `add_host`, `remove_host`, `update_host` |
+| Credentials | `save_credential`, `check_credential`, `delete_credential`, `audit_credentials` |
+| Execution | `run_command`, `run_command_multi`, `upload_file`, `download_file` |
+| Connectivity | `ping_hosts`, `health_check` |
+| Templates | `list_templates`, `expand_template`, `add_template`, `remove_template` |
+| Log | `read_exec_log`, `clear_exec_log`, `save_output` |
+| AI (optional) | `ai_analyze`, `ollama_status` (requires local Ollama) |
 
 **Restart / stop:**
 ```bash

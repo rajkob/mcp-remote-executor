@@ -5,6 +5,7 @@ Replaces plink/pscp — pure Python, works on any OS inside Docker.
 All operations auto-log to exec.log on completion.
 """
 import socket
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -14,6 +15,49 @@ import paramiko
 import credentials
 import vms
 
+# ── Connection pool ───────────────────────────────────────────────────────────
+# Keeps one reusable SSHClient per (ip, port, user).
+# Entries are evicted automatically when the underlying transport closes.
+
+_pool: dict[tuple, paramiko.SSHClient] = {}
+_pool_lock = threading.Lock()
+
+
+def _pool_key(host: dict) -> tuple:
+    return (host["ip"], host.get("port", 22), host.get("user", "root"))
+
+
+def _get_pooled(host: dict) -> paramiko.SSHClient | None:
+    """Return a healthy pooled client, or None if absent/stale."""
+    key = _pool_key(host)
+    with _pool_lock:
+        client = _pool.get(key)
+        if client is None:
+            return None
+        transport = client.get_transport()
+        if transport is None or not transport.is_active():
+            del _pool[key]
+            return None
+        return client
+
+
+def _store_pooled(host: dict, client: paramiko.SSHClient) -> None:
+    key = _pool_key(host)
+    with _pool_lock:
+        _pool[key] = client
+
+
+def close_all_connections() -> int:
+    """Close every pooled connection and clear the pool. Returns count closed."""
+    with _pool_lock:
+        count = len(_pool)
+        for c in _pool.values():
+            try:
+                c.close()
+            except Exception:
+                pass
+        _pool.clear()
+    return count
 
 class CredentialNotFound(Exception):
     pass
@@ -31,8 +75,13 @@ class CommandTimeout(Exception):
     pass
 
 
-def _connect(host: dict) -> paramiko.SSHClient:
-    """Open and return an authenticated paramiko SSHClient."""
+def _connect(host: dict, use_pool: bool = True) -> paramiko.SSHClient:
+    """Return an authenticated SSHClient, reusing a pooled connection when available."""
+    if use_pool:
+        cached = _get_pooled(host)
+        if cached is not None:
+            return cached
+
     ip = host["ip"]
     port = host.get("port", 22)
     user = host.get("user", "root")
@@ -64,6 +113,8 @@ def _connect(host: dict) -> paramiko.SSHClient:
         client.close()
         raise HostUnreachable(f"Cannot connect to {ip}:{port}: {e}")
 
+    if use_pool:
+        _store_pooled(host, client)
     return client
 
 
@@ -88,16 +139,26 @@ def ssh_exec(alias: str, command: str, timeout: int | None = None,
             stderr = stderr_ch.read().decode(errors="replace")
             exit_code = stdout_ch.channel.recv_exit_status()
         except socket.timeout:
+            # Evict the stale connection from the pool before raising
+            with _pool_lock:
+                _pool.pop(_pool_key(host), None)
             raise CommandTimeout(
                 f"Command timed out after {effective_timeout}s on {alias} ({host['ip']})"
             )
         except EOFError:
-            # Unexpected channel close — host crashed, SSH daemon killed, etc.
+            # Unexpected channel close — evict from pool
+            with _pool_lock:
+                _pool.pop(_pool_key(host), None)
             raise HostUnreachable(
                 f"Connection lost mid-command on {alias} ({host['ip']})"
             )
-    finally:
-        client.close()
+    except (HostUnreachable, CommandTimeout, AuthFailure):
+        raise
+    except Exception:
+        # Any other transport-level failure — evict from pool
+        with _pool_lock:
+            _pool.pop(_pool_key(host), None)
+        raise
 
     elapsed = round(time.monotonic() - start, 1)
     if _log:
@@ -151,11 +212,15 @@ def sftp_upload(alias: str, local_path: str, remote_path: str) -> dict:
     client = _connect(host)
     try:
         sftp = client.open_sftp()
-        sftp.put(local_path, remote_path)
-        size = sftp.stat(remote_path).st_size
-        sftp.close()
-    finally:
-        client.close()
+        try:
+            sftp.put(local_path, remote_path)
+            size = sftp.stat(remote_path).st_size
+        finally:
+            sftp.close()
+    except Exception:
+        with _pool_lock:
+            _pool.pop(_pool_key(host), None)
+        raise
 
     elapsed = round(time.monotonic() - start, 1)
     exec_log.append(alias, host["ip"], host.get("port", 22),
@@ -175,11 +240,15 @@ def sftp_download(alias: str, remote_path: str, local_path: str) -> dict:
     client = _connect(host)
     try:
         sftp = client.open_sftp()
-        sftp.get(remote_path, local_path)
-        size = Path(local_path).stat().st_size
-        sftp.close()
-    finally:
-        client.close()
+        try:
+            sftp.get(remote_path, local_path)
+            size = Path(local_path).stat().st_size
+        finally:
+            sftp.close()
+    except Exception:
+        with _pool_lock:
+            _pool.pop(_pool_key(host), None)
+        raise
 
     elapsed = round(time.monotonic() - start, 1)
     exec_log.append(alias, host["ip"], host.get("port", 22),

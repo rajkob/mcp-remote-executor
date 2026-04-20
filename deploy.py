@@ -8,6 +8,8 @@ Usage:
   python deploy.py --pull       # use pre-built Docker Hub image instead of local build
   python deploy.py --restart    # restart existing container only
   python deploy.py --status     # check if server is running
+  python deploy.py --reset-key  # regenerate MCP_API_KEY without full redeploy
+  python deploy.py --version    # print version and exit
 """
 import argparse
 import platform
@@ -26,6 +28,7 @@ MCP_PORT = 8765
 MCP_HOST = "127.0.0.1"
 MCP_URL = f"http://{MCP_HOST}:{MCP_PORT}/sse"
 DASHBOARD_URL = f"http://{MCP_HOST}:{MCP_PORT}/dashboard"
+VERSION = "2.1.5"
 
 IS_WINDOWS = platform.system() == "Windows"
 
@@ -435,11 +438,16 @@ def main():
     parser.add_argument("--status",       action="store_true", help="Check if server is running")
     parser.add_argument("--no-dashboard", action="store_true", help="Disable web dashboard UI")
     parser.add_argument("--reset-key",    action="store_true", help="Regenerate MCP_API_KEY in .env and restart")
+    parser.add_argument("--version",      action="store_true", help="Print version and exit")
     args = parser.parse_args()
 
     print(f"\n{BOLD}Remote Executor MCP Server — Deployment{RESET}")
     print(f"Platform: {platform.system()} {platform.release()}")
     print(f"Project : {BASE_DIR}")
+
+    if args.version:
+        print(f"Version : {VERSION}")
+        return
 
     if args.status:
         check_status()
