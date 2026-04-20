@@ -82,6 +82,49 @@ def clear() -> None:
         path.unlink()
 
 
+def read_by_alias(alias: str, n: int = 20) -> list[dict]:
+    """Return the last n log entries for a specific alias."""
+    from collections import deque
+    path = _log_file()
+    if not path.exists():
+        return []
+    # Read a large window then filter — avoids full-file load while still
+    # handling cases where a single alias has sparse history.
+    with open(path, encoding="utf-8") as f:
+        lines = deque(f, maxlen=max(n * 100, 10000))
+
+    result = []
+    for line in lines:
+        parts = line.strip().split(" | ", 5)
+        if len(parts) == 6 and parts[1] == alias:
+            result.append({
+                "timestamp": parts[0],
+                "alias": parts[1],
+                "host": parts[2],
+                "user": parts[3],
+                "exit": parts[4],
+                "command": parts[5],
+            })
+    return result[-n:]
+
+
+def to_json(entries: list[dict]) -> str:
+    """Serialize log entries to a JSON array string."""
+    import json
+    return json.dumps(entries, ensure_ascii=False, indent=2)
+
+
+def to_csv(entries: list[dict]) -> str:
+    """Serialize log entries to CSV text (header + rows)."""
+    import csv
+    import io
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=["timestamp", "alias", "host", "user", "exit", "command"])
+    writer.writeheader()
+    writer.writerows(entries)
+    return buf.getvalue()
+
+
 def format_log_table(entries: list[dict]) -> str:
     """Format log entries as a markdown table."""
     if not entries:

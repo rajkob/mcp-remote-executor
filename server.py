@@ -10,7 +10,7 @@ Tools are grouped by category:
   Execution        — run_command, run_command_multi, upload_file, download_file
   Connectivity     — ping_hosts, health_check
   Templates        — list_templates, expand_template, add_template, remove_template
-  Log              — read_exec_log, clear_exec_log, save_output
+  Log              — read_exec_log, clear_exec_log, save_output, command_history, export_exec_log
   AI (optional)    — ai_analyze, ollama_status  (require Ollama running locally)
 """
 import csv as _csv
@@ -598,6 +598,44 @@ def clear_exec_log() -> str:
     """Clear all entries from the execution log (exec.log). Asks for confirmation via return value."""
     exec_log.clear()
     return "✓ Execution log cleared."
+
+
+@mcp.tool()
+def command_history(alias: str, n: int = 20) -> str:
+    """
+    Show the last N commands run on a specific host (by alias).
+    Useful for auditing what was run on a host and whether it succeeded.
+    alias: exact host alias (e.g. "web01")
+    n: number of entries to return (default 20, max 500)
+    """
+    n = min(max(1, n), 500)
+    entries = exec_log.read_by_alias(alias, n)
+    if not entries:
+        return f"No history found for alias **{alias}**."
+    header = f"**Last {len(entries)} command(s) on `{alias}`**\n\n"
+    return header + exec_log.format_log_table(entries)
+
+
+@mcp.tool()
+def export_exec_log(alias: str = "", format: str = "json") -> str:
+    """
+    Export the execution log as machine-readable JSON or CSV.
+    alias: filter to a single host alias — leave empty for all hosts.
+    format: "json" (default) or "csv"
+    Returns the raw JSON array or CSV text.
+    """
+    fmt = format.strip().lower()
+    if fmt not in ("json", "csv"):
+        return "❌ Unsupported format. Use 'json' or 'csv'."
+
+    entries = exec_log.read_by_alias(alias, 10000) if alias.strip() else exec_log.read(10000)
+    if not entries:
+        label = f" for `{alias}`" if alias.strip() else ""
+        return f"No log entries found{label}."
+
+    if fmt == "json":
+        return exec_log.to_json(entries)
+    return exec_log.to_csv(entries)
 
 
 @mcp.tool()

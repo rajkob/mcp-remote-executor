@@ -139,5 +139,92 @@ class TestLogRotation(unittest.TestCase):
             exec_log.MAX_LOG_LINES = original_max
 
 
+# ── TestReadByAlias ───────────────────────────────────────────────────────────
+
+class TestReadByAlias(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        _reset(self._tmp.name)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _log(self, alias, command="uptime", exit_code=0):
+        exec_log.append(alias, "10.0.0.1", 22, "root", exit_code, command)
+
+    def test_filters_to_correct_alias(self):
+        self._log("web01", "df -h")
+        self._log("db01", "pg_dump")
+        self._log("web01", "ls -la")
+        entries = exec_log.read_by_alias("web01")
+        self.assertEqual(len(entries), 2)
+        self.assertTrue(all(e["alias"] == "web01" for e in entries))
+
+    def test_empty_when_alias_not_found(self):
+        self._log("web01")
+        self.assertEqual(exec_log.read_by_alias("ghost"), [])
+
+    def test_returns_last_n(self):
+        for i in range(10):
+            self._log("web01", f"cmd{i}")
+        entries = exec_log.read_by_alias("web01", n=3)
+        self.assertEqual(len(entries), 3)
+        self.assertEqual(entries[-1]["command"], "cmd9")
+
+    def test_empty_log_returns_empty(self):
+        self.assertEqual(exec_log.read_by_alias("web01"), [])
+
+    def test_entry_fields_preserved(self):
+        self._log("svc01", "systemctl status nginx", exit_code=1)
+        entry = exec_log.read_by_alias("svc01", 1)[0]
+        self.assertEqual(entry["alias"], "svc01")
+        self.assertEqual(entry["exit"], "1")
+        self.assertEqual(entry["command"], "systemctl status nginx")
+
+
+# ── TestToJsonAndToCsv ────────────────────────────────────────────────────────
+
+class TestExportFormats(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        _reset(self._tmp.name)
+        for i in range(3):
+            exec_log.append(f"h{i}", f"10.0.0.{i}", 22, "root", i, f"cmd{i}")
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_to_json_is_valid_json(self):
+        import json
+        entries = exec_log.read()
+        text = exec_log.to_json(entries)
+        parsed = json.loads(text)
+        self.assertEqual(len(parsed), 3)
+        self.assertIn("alias", parsed[0])
+        self.assertIn("command", parsed[0])
+
+    def test_to_json_empty(self):
+        import json
+        text = exec_log.to_json([])
+        self.assertEqual(json.loads(text), [])
+
+    def test_to_csv_has_header(self):
+        entries = exec_log.read()
+        text = exec_log.to_csv(entries)
+        self.assertTrue(text.startswith("timestamp,"))
+        self.assertIn("alias", text)
+        self.assertIn("command", text)
+
+    def test_to_csv_row_count(self):
+        entries = exec_log.read()
+        lines = exec_log.to_csv(entries).strip().splitlines()
+        self.assertEqual(len(lines), 4)  # 1 header + 3 data rows
+
+    def test_to_csv_empty(self):
+        text = exec_log.to_csv([])
+        lines = text.strip().splitlines()
+        self.assertEqual(len(lines), 1)  # header only
+
+
 if __name__ == "__main__":
     unittest.main()

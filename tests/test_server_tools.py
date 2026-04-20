@@ -602,5 +602,106 @@ class TestWebhookNotifications(unittest.TestCase):
             server._send_webhook({"event": "test"})
 
 
+# ── Phase 3a: command_history ─────────────────────────────────────────────────
+
+class TestCommandHistory(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        _setup_vms(self._tmp.name)
+        import exec_log as _el
+        _el._write_count = 0
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _log(self, alias, command="uptime", exit_code=0):
+        import exec_log as _el
+        _el.append(alias, "10.0.0.1", 22, "root", exit_code, command)
+
+    def test_returns_history_for_alias(self):
+        self._log("web01", "df -h")
+        self._log("web01", "free -m")
+        result = server.command_history("web01", 20)
+        self.assertIn("df -h", result)
+        self.assertIn("free -m", result)
+        self.assertIn("web01", result)
+
+    def test_filters_to_correct_alias(self):
+        self._log("web01", "uptime")
+        self._log("db01", "pg_dump")
+        result = server.command_history("web01", 20)
+        self.assertIn("uptime", result)
+        self.assertNotIn("pg_dump", result)
+
+    def test_no_history_returns_message(self):
+        result = server.command_history("ghost", 20)
+        self.assertIn("ghost", result)
+        self.assertNotIn("|", result)
+
+    def test_n_capped_at_500(self):
+        # n > 500 should not error
+        result = server.command_history("web01", 9999)
+        self.assertIsInstance(result, str)
+
+    def test_includes_exit_code_column(self):
+        self._log("web01", "badcmd", exit_code=1)
+        result = server.command_history("web01", 1)
+        self.assertIn("Exit", result)
+        self.assertIn("1", result)
+
+
+# ── Phase 3c: export_exec_log ─────────────────────────────────────────────────
+
+class TestExportExecLog(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        _setup_vms(self._tmp.name)
+        import exec_log as _el
+        _el._write_count = 0
+        for i in range(3):
+            _el.append(f"h{i}", f"10.0.0.{i}", 22, "root", 0, f"cmd{i}")
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_json_default_format(self):
+        import json
+        result = server.export_exec_log()
+        parsed = json.loads(result)
+        self.assertEqual(len(parsed), 3)
+        self.assertIn("alias", parsed[0])
+
+    def test_csv_format(self):
+        result = server.export_exec_log(format="csv")
+        self.assertTrue(result.strip().startswith("timestamp,"))
+        lines = result.strip().splitlines()
+        self.assertEqual(len(lines), 4)  # header + 3 rows
+
+    def test_filter_by_alias(self):
+        import exec_log as _el
+        _el.append("web01", "10.0.0.9", 22, "root", 0, "special-cmd")
+        import json
+        result = server.export_exec_log(alias="web01")
+        parsed = json.loads(result)
+        self.assertEqual(len(parsed), 1)
+        self.assertEqual(parsed[0]["command"], "special-cmd")
+
+    def test_unsupported_format_returns_error(self):
+        result = server.export_exec_log(format="xml")
+        self.assertIn("❌", result)
+        self.assertIn("Unsupported format", result)
+
+    def test_empty_log_returns_message(self):
+        import exec_log as _el
+        _el.clear()
+        result = server.export_exec_log()
+        self.assertIn("No log entries", result)
+
+    def test_empty_alias_filter_no_match_returns_message(self):
+        result = server.export_exec_log(alias="ghost")
+        self.assertIn("No log entries", result)
+        self.assertIn("ghost", result)
+
+
 if __name__ == "__main__":
     unittest.main()
