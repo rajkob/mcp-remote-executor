@@ -116,16 +116,24 @@ Once the server is running, open in your browser:
 http://localhost:8765/dashboard
 ```
 
-The dashboard shows a live view of all hosts in `vms.yaml`:
+The dashboard shows metrics for **actively monitored hosts only** — nothing is polled by default:
 
 | Panel | What it shows |
 |---|---|
-| Summary bar | Total hosts, online count, avg CPU, avg mem |
+| Summary bar | Total watched hosts, online count, avg CPU, avg mem |
 | Host cards | Status (OK / Unreachable / Error), CPU %, memory %, disk %, uptime |
 | Auto-refresh | Toggle 30-second auto-refresh |
 | API key field | Enter your `MCP_API_KEY` if auth is enabled |
 
-Metrics are collected via SSH and cached for 30 seconds. Click **⟳ Refresh** to force an update.
+To populate the dashboard, tell the agent:
+```
+Start monitoring all
+```
+or scope it to a project / tag / env / zone:
+```
+Start monitoring PROJECT_CORE
+```
+Use `Stop monitoring all` when done. Metrics are collected via SSH and cached for 30 seconds.
 
 **API endpoints available at the same server:**
 - `GET /api/status` — JSON metrics for all hosts
@@ -146,7 +154,7 @@ docker compose restart remote-executor
 
 ## Tools
 
-The server exposes **23 MCP tools** once connected. See the [Tools Reference in README.md](README.md#tools-reference-23-tools) for the full list.
+The server exposes **29 MCP tools** once connected. See the [Tools Reference in README.md](README.md#tools-reference-29-tools) for the full list.
 
 ---
 
