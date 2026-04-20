@@ -22,7 +22,7 @@ Give AI assistants **SSH access to your remote servers** — run commands, trans
 - **VPN-friendly** — Docker `network_mode: host` — private subnets reachable out of the box
 - **Encrypted credentials** — Fernet (AES-128-CBC + HMAC-SHA256), never plaintext on disk
 - **No Python on host** — deploy with `deploy.ps1` (Windows), `deploy.sh` (Linux/macOS), or `deploy.py` (cross-platform, supports `--pull` / `--restart` / `--status` / `--reset-key` / `--version`)
-- **SSH connection pool** — transports are reused per host; fewer handshakes, lower latency on repeated commands
+- **SSH connection pool** — transports are reused per host; fewer handshakes, lower latency on repeated commands; pool capped at `MAX_POOL_SIZE` (default 50) with FIFO eviction to prevent socket accumulation
 - **Works with** — VS Code Copilot, Claude Desktop, Continue.dev, any SSE MCP client
 
 ---
@@ -256,7 +256,7 @@ extra_hosts:
 |---|---|
 | `data/vms.yaml` | Host inventory — projects, aliases, IPs, tags |
 | `data/credentials` | Fernet-encrypted JSON — SSH passwords |
-| `data/exec.log` | Append-only execution log |
+| `data/exec.log` | Append-only execution log (trimmed to `MAX_LOG_LINES`, commands capped to `MAX_COMMAND_LEN` chars) |
 | `data/output/` | Saved command output files |
 | `.env` | `CRED_MASTER_KEY` — keep safe, never commit |
 
@@ -270,6 +270,7 @@ extra_hosts:
 - All SSH host keys are auto-accepted (AutoAddPolicy) — suitable for internal/VPN networks
 - Host reachability uses **TCP connect to the SSH port** — works on VMs where ICMP (ping) is firewalled
 - `.env` and `data/` are in `.gitignore` — never committed
+- Host aliases are validated against `^[A-Za-z0-9_.:-]+$` before being written to `vms.yaml`
 
 ### Destructive command guard
 
@@ -292,6 +293,10 @@ Run "reboot" on web01 with force=True
 ### Per-host concurrency limit
 
 At most **3 concurrent SSH sessions per host** by default (configurable via `MAX_CONCURRENT_PER_HOST` env var). Prevents accidental SSH flooding during large multi-host runs.
+
+### Connection pool cap
+
+The SSH transport pool is capped at **50 connections** by default (`MAX_POOL_SIZE` env var). When the cap is reached the oldest entry is closed and evicted (FIFO). Prevents silent socket accumulation in long-running deployments.
 
 ### Webhook notifications
 
