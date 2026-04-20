@@ -17,7 +17,8 @@ Give AI assistants **SSH access to your remote servers** — run commands, trans
 - **Execution log panel** — recent SSH command history, filterable by host, live in the dashboard
 - **VPN-friendly** — Docker `network_mode: host` — private subnets reachable out of the box
 - **Encrypted credentials** — Fernet (AES-128-CBC + HMAC-SHA256), never plaintext on disk
-- **No Python on host** — deploy with `deploy.ps1` (Windows), `deploy.sh` (Linux/macOS), or `deploy.py` (cross-platform, supports `--pull` / `--restart` / `--status`)
+- **No Python on host** — deploy with `deploy.ps1` (Windows), `deploy.sh` (Linux/macOS), or `deploy.py` (cross-platform, supports `--pull` / `--restart` / `--status` / `--reset-key` / `--version`)
+- **SSH connection pool** — transports are reused per host; fewer handshakes, lower latency on repeated commands
 - **Works with** — VS Code Copilot, Claude Desktop, Continue.dev, any SSE MCP client
 
 ---

@@ -102,6 +102,8 @@ python deploy.py --no-dashboard  # deploy without web dashboard
 python deploy.py --pull          # use pre-built image from Docker Hub
 python deploy.py --restart       # restart existing container only
 python deploy.py --status        # check if server is running
+python deploy.py --reset-key     # regenerate API key without full redeploy
+python deploy.py --version       # print version and exit
 ```
 
 ---
