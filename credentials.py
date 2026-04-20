@@ -19,14 +19,22 @@ def _cred_file() -> Path:
     return Path(os.getenv("DATA_DIR", "/app/data")) / "credentials"
 
 
+_fernet_instance: Fernet | None = None
+_fernet_key_used: str = ""
+
+
 def _get_fernet() -> Fernet:
+    global _fernet_instance, _fernet_key_used
     key = os.getenv("CRED_MASTER_KEY", "").strip()
     if not key:
         raise RuntimeError(
             "CRED_MASTER_KEY environment variable is not set. "
             "Run init.py to generate a key and add it to .env"
         )
-    return Fernet(key.encode())
+    if _fernet_instance is None or key != _fernet_key_used:
+        _fernet_instance = Fernet(key.encode())
+        _fernet_key_used = key
+    return _fernet_instance
 
 
 # ─── In-memory cache ──────────────────────────────────────────────────────────

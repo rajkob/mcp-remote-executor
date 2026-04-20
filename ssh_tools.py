@@ -152,7 +152,7 @@ def sftp_upload(alias: str, local_path: str, remote_path: str) -> dict:
     try:
         sftp = client.open_sftp()
         sftp.put(local_path, remote_path)
-        size = Path(local_path).stat().st_size
+        size = sftp.stat(remote_path).st_size
         sftp.close()
     finally:
         client.close()

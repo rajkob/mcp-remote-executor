@@ -433,9 +433,9 @@ ollama run mcp-executor
 
 ## 9. Integrating Ollama into server.py
 
-Add the following to `server.py` to give your MCP server two new tools: `ai_analyze` (runs a command on a remote host and uses the local LLM to analyze the output) and `ollama_status` (checks if Ollama is running and what is loaded in VRAM).
+> **✅ Already built-in as of v2.1.1.** The `ai_analyze` and `ollama_status` tools ship with `server.py` — you do **not** need to add any code. The server always exposes **23 tools** (including the two AI tools). They gracefully return an error if Ollama is not running, so having Ollama installed is optional.
 
-> **Note:** Adding these tools increases the total MCP tool count from **21 → 23**. Update your README and release notes accordingly if you publish this change.
+All you need to do is configure the environment variables so the container can reach Ollama on your host:
 
 ### Add to `.env` (Docker container vars)
 
@@ -447,161 +447,9 @@ OLLAMA_MODEL=qwen2.5:7b
 
 > **Note:** `OLLAMA_KEEP_ALIVE` is an Ollama host process variable — set it in your Windows system environment or PowerShell session, **not** in `.env`. See Section 5 for details.
 
-### Add to `server.py`
+### Tool usage examples
 
-Add after the existing imports at the top:
-
-```python
-import urllib.request
-import json as _json
-```
-
-Add the Ollama helper functions and new tools after your existing tool definitions:
-
-```python
-# ─── OLLAMA HELPER ────────────────────────────────────────────────────────────
-
-OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:7b")
-
-
-def _ollama_available() -> bool:
-    """Check if Ollama is running and reachable."""
-    try:
-        urllib.request.urlopen(f"{OLLAMA_URL}/api/tags", timeout=2)
-        return True
-    except Exception:
-        return False
-
-
-def _ollama_chat(prompt: str, system: str = "") -> str:
-    """Send a prompt to local Ollama, return the response text."""
-    payload = _json.dumps({
-        "model": OLLAMA_MODEL,
-        "messages": [
-            {"role": "system", "content": system or "You are an expert DevOps/AIOps assistant."},
-            {"role": "user",   "content": prompt}
-        ],
-        "stream": False,
-        "options": {"temperature": 0.1, "num_ctx": 4096}
-    }).encode()
-
-    req = urllib.request.Request(
-        f"{OLLAMA_URL}/api/chat",
-        data=payload,
-        headers={"Content-Type": "application/json"},
-        method="POST"
-    )
-    with urllib.request.urlopen(req, timeout=120) as resp:
-        result = _json.loads(resp.read())
-        return result["message"]["content"].strip()
-
-
-# ─── AI TOOLS ─────────────────────────────────────────────────────────────────
-
-@mcp.tool()
-def ai_analyze(alias: str, question: str) -> str:
-    """
-    Run a diagnostic command on a host then use the local Ollama LLM to analyze the output.
-    Examples: 'analyze disk usage on web01', 'explain errors in logs on db01'.
-    Requires Ollama running locally at OLLAMA_URL (default: http://localhost:11434).
-    """
-    if not _ollama_available():
-        return (
-            "❌ Ollama is not running.\n"
-            "Start it with: ollama serve\n"
-            f"Expected at: {OLLAMA_URL}\n"
-            "Or run: .\\ollama-start.ps1"
-        )
-
-    # Auto-select diagnostic command based on question keywords
-    q = question.lower()
-    if any(w in q for w in ["disk", "space", "storage"]):
-        command = "df -h && du -sh /* 2>/dev/null | sort -rh | head -20"
-    elif any(w in q for w in ["memory", "mem", "ram"]):
-        command = "free -m && ps aux --sort=-%mem | head -15"
-    elif any(w in q for w in ["cpu", "load", "process"]):
-        command = "uptime && ps aux --sort=-%cpu | head -15"
-    elif any(w in q for w in ["log", "error", "fail"]):
-        command = "journalctl -n 100 --no-pager -p err 2>/dev/null || tail -100 /var/log/syslog 2>/dev/null"
-    elif any(w in q for w in ["network", "connection", "port"]):
-        command = "ss -tulnp && netstat -s 2>/dev/null | head -20"
-    elif any(w in q for w in ["service", "systemd", "running"]):
-        command = "systemctl list-units --state=failed && systemctl status --no-pager 2>/dev/null | head -40"
-    else:
-        command = "uptime && free -m && df -h && ps aux --sort=-%cpu | head -10"
-
-    # Run command on remote host
-    try:
-        r = ssh_tools.ssh_exec(alias, command)
-    except Exception as e:
-        return f"❌ SSH failed: {e}"
-
-    if not r.get("stdout") and not r.get("stderr"):
-        return f"⚠️ No output from host '{alias}' for command: {command}"
-
-    raw_output = r.get("stdout", "") + r.get("stderr", "")
-
-    # Ask local LLM to analyze
-    system_prompt = (
-        "You are an expert Linux sysadmin and AIOps engineer. "
-        "Analyze the system output provided and answer the user's question. "
-        "Be concise, highlight issues, and suggest actionable fixes."
-    )
-    user_prompt = (
-        f"Host: {alias} ({r.get('ip', '?')})\n"
-        f"Question: {question}\n\n"
-        f"Command run: {command}\n\n"
-        f"Output:\n{raw_output[:3000]}"
-    )
-
-    try:
-        analysis = _ollama_chat(user_prompt, system_prompt)
-    except Exception as e:
-        return f"❌ Ollama analysis failed: {e}\n\nRaw output:\n{raw_output}"
-
-    return (
-        f"## 🤖 AI Analysis: {alias}\n"
-        f"**Question:** {question}\n"
-        f"**Command:** `{command}`\n\n"
-        f"### Analysis\n{analysis}\n\n"
-        f"---\n"
-        f"*Model: {OLLAMA_MODEL} @ {OLLAMA_URL}*"
-    )
-
-
-@mcp.tool()
-def ollama_status() -> str:
-    """Check if local Ollama LLM is running and show which models are loaded in VRAM."""
-    if not _ollama_available():
-        return (
-            f"❌ Ollama not reachable at {OLLAMA_URL}\n"
-            "Start with: `ollama serve`\n"
-            "Or run `ollama-start.ps1`"
-        )
-    try:
-        req = urllib.request.Request(f"{OLLAMA_URL}/api/ps")
-        with urllib.request.urlopen(req, timeout=5) as resp:
-            data = _json.loads(resp.read())
-        models = data.get("models", [])
-        if not models:
-            return (
-                f"✅ Ollama is running at {OLLAMA_URL}\n"
-                f"⚠️ No models loaded in VRAM (idle)\n"
-                f"Configured model: `{OLLAMA_MODEL}`"
-            )
-        lines = [f"✅ Ollama running — {len(models)} model(s) in VRAM:\n"]
-        for m in models:
-            vram_gb = round(m.get("size", 0) / 1e9, 1)
-            lines.append(f"- `{m['name']}` — {vram_gb} GB VRAM")
-        return "\n".join(lines)
-    except Exception as e:
-        return f"⚠️ Ollama running but status check failed: {e}"
-```
-
-### New MCP Tool Usage Examples
-
-After adding these tools, you can use in both Copilot Agent mode and Continue.dev:
+Once Ollama is running and the env vars are set, you can use in both Copilot Agent mode and Continue.dev:
 
 ```
 "Analyze disk usage on web01"
@@ -760,7 +608,7 @@ docker compose down
 | **Data privacy** | Sent to GitHub | Stays on machine |
 | **VRAM used** | 0 (cloud) | ~5GB |
 | **Best for** | Dev & testing | Ops & VPN work |
-| **MCP tools** | ✅ 21 tools (+ 2 optional AI tools if Section 9 applied) | ✅ 21 tools (+ 2 optional AI tools if Section 9 applied) |
+| **MCP tools** | ✅ 23 tools (ai_analyze + ollama_status built-in) | ✅ 23 tools (ai_analyze + ollama_status built-in) |
 
 ---
 

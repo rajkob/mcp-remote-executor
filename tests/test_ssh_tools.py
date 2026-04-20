@@ -236,14 +236,17 @@ class TestSftp(unittest.TestCase):
         client = MagicMock()
         sftp = MagicMock()
         client.open_sftp.return_value = sftp
+        # stat() is called after put() to get remote file size
+        sftp.stat.return_value.st_size = 11
 
         with patch.object(ssh_tools, "_connect", return_value=client):
             with patch("exec_log.append"):
                 result = ssh_tools.sftp_upload("web01", str(local), "/tmp/test.txt")
 
         self.assertTrue(result["success"])
-        self.assertGreater(result["bytes_transferred"], 0)
+        self.assertEqual(result["bytes_transferred"], 11)
         sftp.put.assert_called_once_with(str(local), "/tmp/test.txt")
+        sftp.stat.assert_called_once_with("/tmp/test.txt")
 
     def test_download_returns_bytes(self):
         local = Path(self._tmp.name) / "downloaded.txt"

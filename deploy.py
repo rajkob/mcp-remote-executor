@@ -434,6 +434,7 @@ def main():
     parser.add_argument("--restart",      action="store_true", help="Restart existing container only")
     parser.add_argument("--status",       action="store_true", help="Check if server is running")
     parser.add_argument("--no-dashboard", action="store_true", help="Disable web dashboard UI")
+    parser.add_argument("--reset-key",    action="store_true", help="Regenerate MCP_API_KEY in .env and restart")
     args = parser.parse_args()
 
     print(f"\n{BOLD}Remote Executor MCP Server — Deployment{RESET}")
@@ -442,6 +443,25 @@ def main():
 
     if args.status:
         check_status()
+        return
+
+    if args.reset_key:
+        head("Regenerating API Key")
+        env_file = BASE_DIR / ".env"
+        env_content = env_file.read_text(encoding="utf-8") if env_file.exists() else ""
+        new_key = secrets.token_urlsafe(32)
+        if "MCP_API_KEY=" in env_content:
+            env_content = re.sub(r"^MCP_API_KEY=.*$", f"MCP_API_KEY={new_key}", env_content, flags=re.MULTILINE)
+        else:
+            env_content = env_content.rstrip() + f"\nMCP_API_KEY={new_key}\n"
+        env_file.write_text(env_content, encoding="utf-8")
+        ok(f"New API key written to .env")
+        print(f"\n  {BOLD}New API key:{RESET} {CYAN}{new_key}{RESET}")
+        print(f"  {YELLOW}Update your MCP client config with the new key.{RESET}")
+        if restart_only():
+            ok("Container restarted with new key.")
+        else:
+            err("Restart failed. Run: docker compose restart remote-executor")
         return
 
     if args.restart:
