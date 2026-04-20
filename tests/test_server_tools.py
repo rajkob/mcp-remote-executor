@@ -360,5 +360,84 @@ class TestExecLogTools(unittest.TestCase):
         self.assertIn("✓", result)
 
 
+# ── Phase 1: destructive guard + force param ──────────────────────────────────
+
+class TestRunCommandDestructiveGuard(unittest.TestCase):
+    """Tests for the 🚫 guard and force=True bypass in run_command / run_command_multi."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        _setup_vms(self._tmp.name)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    # --- run_command -----------------------------------------------------------
+
+    def test_blocked_command_returns_blocked_icon(self):
+        result = server.run_command("web01", "rm -rf /")
+        self.assertIn("🚫", result)
+        self.assertIn("blocked", result.lower())
+
+    def test_blocked_command_does_not_call_ssh(self):
+        with patch("server.ssh_tools.ssh_exec") as mock_exec:
+            server.run_command("web01", "shutdown -h now")
+            mock_exec.assert_not_called()
+
+    def test_force_true_passes_through_to_ssh_exec(self):
+        r = {"alias": "web01", "ip": "10.0.0.1", "exit_code": 0,
+             "stdout": "done\n", "stderr": "", "elapsed_s": 0.1}
+        with patch("server.ssh_tools.ssh_exec", return_value=r) as mock_exec:
+            result = server.run_command("web01", "reboot", force=True)
+        mock_exec.assert_called_once_with("web01", "reboot", force=True)
+        self.assertIn("exit 0", result)
+
+    def test_safe_command_never_blocked(self):
+        r = {"alias": "web01", "ip": "10.0.0.1", "exit_code": 0,
+             "stdout": "ok\n", "stderr": "", "elapsed_s": 0.1}
+        with patch("server.ssh_tools.ssh_exec", return_value=r):
+            result = server.run_command("web01", "df -h")
+        self.assertNotIn("🚫", result)
+        self.assertIn("exit 0", result)
+
+    def test_destructive_blocked_exception_mapped_to_blocked_icon(self):
+        """If ssh_tools raises DestructiveCommandBlocked, server returns 🚫."""
+        with patch("server.ssh_tools.ssh_exec",
+                   side_effect=ssh_tools.DestructiveCommandBlocked("blocked (test)")):
+            result = server.run_command("web01", "rm -rf /", force=True)
+        self.assertIn("🚫", result)
+
+    # --- run_command_multi ----------------------------------------------------
+
+    def test_multi_blocked_pre_check_returns_blocked_icon(self):
+        result = server.run_command_multi("all", "mkfs.ext4 /dev/sda")
+        self.assertIn("🚫", result)
+
+    def test_multi_blocked_does_not_call_resolve_target(self):
+        with patch("server.vms.resolve_target") as mock_resolve:
+            server.run_command_multi("all", "dd if=/dev/zero of=/dev/sda")
+            mock_resolve.assert_not_called()
+
+    def test_multi_force_true_reaches_ssh_exec_multi(self):
+        multi_results = [
+            {"alias": "web01", "ip": "10.0.0.1", "exit_code": 0,
+             "stdout": "rebooted\n", "stderr": "", "elapsed_s": 0.2},
+        ]
+        with patch("server.ssh_tools.ssh_exec_multi", return_value=multi_results) as mock_multi:
+            result = server.run_command_multi("all", "reboot", force=True)
+        mock_multi.assert_called_once_with(["web01"], "reboot", mode="sequential", force=True)
+        self.assertNotIn("🚫", result)
+
+    def test_multi_safe_command_not_blocked(self):
+        multi_results = [
+            {"alias": "web01", "ip": "10.0.0.1", "exit_code": 0,
+             "stdout": "up\n", "stderr": "", "elapsed_s": 0.1},
+        ]
+        with patch("server.ssh_tools.ssh_exec_multi", return_value=multi_results):
+            result = server.run_command_multi("all", "uptime")
+        self.assertNotIn("🚫", result)
+        self.assertIn("1 success", result)
+
+
 if __name__ == "__main__":
     unittest.main()

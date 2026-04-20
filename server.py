@@ -253,14 +253,20 @@ def audit_credentials() -> str:
 # ─── EXECUTION ────────────────────────────────────────────────────────────────
 
 @mcp.tool()
-def run_command(alias: str, command: str) -> str:
+def run_command(alias: str, command: str, force: bool = False) -> str:
     """
     Run a shell command on a single host by alias.
     Returns stdout, stderr, exit code, and elapsed time.
     Auto-logged to exec.log.
+    Set force=True to bypass the destructive command guard.
     """
+    # Pre-check before opening any SSH connection
+    if not force:
+        blocked = ssh_tools._check_destructive(command)
+        if blocked:
+            return f"\U0001f6ab Blocked ({blocked}). Use force=True to override."
     try:
-        r = ssh_tools.ssh_exec(alias, command)
+        r = ssh_tools.ssh_exec(alias, command, force=force)
         icon = "✅" if r["exit_code"] == 0 else "❌"
         lines = [
             f"─── {r['alias']} ({r['ip']}) ── {icon} exit {r['exit_code']} ── {r['elapsed_s']}s ───"
@@ -270,6 +276,8 @@ def run_command(alias: str, command: str) -> str:
         if r.get("stderr"):
             lines.append(f"[stderr] {r['stderr'].rstrip()}")
         return "\n".join(lines)
+    except ssh_tools.DestructiveCommandBlocked as e:
+        return f"🚫 {e}"
     except ssh_tools.CredentialNotFound as e:
         return f"❌ {e}"
     except ssh_tools.HostUnreachable as e:
@@ -287,13 +295,21 @@ def run_command_multi(
     target: str,
     command: str,
     mode: Literal["sequential", "parallel"] = "sequential",
+    force: bool = False,
 ) -> str:
     """
     Run a shell command on multiple hosts.
     target: alias | project name | tag | env label | zone label | "all"
     mode: 'sequential' (stream as each completes) | 'parallel' (all at once)
+    force: bypass the destructive command guard
     Auto-logged to exec.log per host.
     """
+    # Pre-check destructive guard before touching any host
+    if not force:
+        blocked = ssh_tools._check_destructive(command)
+        if blocked:
+            return f"🚫 Blocked ({blocked}). Use force=True to override."
+
     try:
         hosts = vms.resolve_target(target)
     except vms.HostNotFound as e:
@@ -303,7 +319,7 @@ def run_command_multi(
         return f"No hosts found for target '{target}'."
 
     aliases = [h["alias"] for h in hosts]
-    results = ssh_tools.ssh_exec_multi(aliases, command, mode=mode)
+    results = ssh_tools.ssh_exec_multi(aliases, command, mode=mode, force=force)
 
     lines = [f"**Ran `{command}` on {len(results)} host(s)** (mode: {mode})\n"]
     ok = failed = 0
