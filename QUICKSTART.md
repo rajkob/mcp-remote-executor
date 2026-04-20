@@ -83,6 +83,10 @@ Check disk usage on web01
 Ping all hosts
 Health check web01
 Run "df -h" on all hosts in parallel
+Start monitoring PROJECT_CORE
+Monitoring status
+Command history for web01
+Export exec log as csv
 Analyse disk usage on web01   (requires local Ollama — see LOCAL_LLM_SETUP.md)
 ```
 
@@ -94,7 +98,16 @@ Analyse disk usage on web01   (requires local Ollama — see LOCAL_LLM_SETUP.md)
 http://localhost:8765/dashboard
 ```
 
-Live CPU / memory / disk for all hosts. Auto-refreshes every 30 seconds.
+The dashboard shows metrics **only for hosts you are actively monitoring**. By default nothing is polled.
+To populate it, tell the agent:
+```
+Start monitoring all
+```
+or scope it to a project:
+```
+Start monitoring PROJECT_CORE
+```
+Use `Stop monitoring all` to turn it off again.
 
 ---
 
@@ -109,16 +122,17 @@ Live CPU / memory / disk for all hosts. Auto-refreshes every 30 seconds.
 | Execution log | `data/exec.log` |
 | Env / API key | `.env` |
 
-### Available MCP tools (23)
+### Available MCP tools (29)
 
 | Category | Tools |
 |---|---|
-| Host management | `list_hosts`, `add_host`, `remove_host`, `update_host` |
+| Host management | `list_hosts`, `add_host`, `remove_host`, `update_host`, `import_hosts` |
 | Credentials | `save_credential`, `check_credential`, `delete_credential`, `audit_credentials` |
 | Execution | `run_command`, `run_command_multi`, `upload_file`, `download_file` |
 | Connectivity | `ping_hosts`, `health_check` |
+| Monitoring | `start_monitoring`, `stop_monitoring`, `monitoring_status` |
 | Templates | `list_templates`, `expand_template`, `add_template`, `remove_template` |
-| Log | `read_exec_log`, `clear_exec_log`, `save_output` |
+| Log | `read_exec_log`, `clear_exec_log`, `save_output`, `command_history`, `export_exec_log` |
 | AI (optional) | `ai_analyze`, `ollama_status` (requires local Ollama) |
 
 **Restart / stop:**

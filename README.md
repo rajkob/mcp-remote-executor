@@ -12,9 +12,13 @@ Give AI assistants **SSH access to your remote servers** — run commands, trans
 
 ## What it does
 
-- **23 MCP tools** — run commands, upload/download files, check reachability, manage credentials, health check; optional AI-assisted analysis via local Ollama
-- **Web dashboard** — live CPU / memory / disk / uptime for all hosts at `http://localhost:8765/dashboard`
-- **Execution log panel** — recent SSH command history, filterable by host, live in the dashboard
+- **29 MCP tools** — run commands, upload/download files, check reachability, manage credentials, bulk-import hosts (CSV/JSON), on-demand monitoring, per-host command history, structured log export (JSON/CSV), health check; optional AI-assisted analysis via local Ollama
+- **Web dashboard** — live CPU / memory / disk / uptime for **actively monitored** hosts at `http://localhost:8765/dashboard`; monitoring is off by default and activated per scope (project, env, zone, tag, or alias)
+- **On-demand monitoring** — `start_monitoring`, `stop_monitoring`, `monitoring_status` let you focus on the hosts you care about right now, without polling everything continuously
+- **Execution log panel** — recent SSH command history, filterable by host, live in the dashboard; also exportable as JSON or CSV via `export_exec_log`
+- **Bulk host import** — `import_hosts` accepts CSV or JSON to onboard many hosts at once
+- **Webhook notifications** — set `WEBHOOK_URL` to receive `command_failed` / `host_down` events to Slack, Teams, or any HTTP endpoint
+- **Destructive command guard** — `rm -rf /`, `dd`, `mkfs`, `shutdown` and similar are blocked by default; `force=True` overrides
 - **VPN-friendly** — Docker `network_mode: host` — private subnets reachable out of the box
 - **Encrypted credentials** — Fernet (AES-128-CBC + HMAC-SHA256), never plaintext on disk
 - **No Python on host** — deploy with `deploy.ps1` (Windows), `deploy.sh` (Linux/macOS), or `deploy.py` (cross-platform, supports `--pull` / `--restart` / `--status` / `--reset-key` / `--version`)
@@ -111,7 +115,7 @@ Add to your **User Settings JSON** (`Ctrl+Shift+P` → "Open User Settings JSON"
 }
 ```
 
-Then in Copilot Chat, switch to **Agent mode** and the 23 remote-executor tools will be available.
+Then in Copilot Chat, switch to **Agent mode** and the 29 remote-executor tools will be available.
 
 ### Claude Desktop
 
@@ -156,17 +160,24 @@ Add to `~/.continue/config.json`:
 ```
 "List all my hosts"
 "Add host web01 with IP <your-host-ip> to project CORE"
+"Import hosts from this CSV: ..."
 "Save credential for web01"
 "Check disk usage on web01"
 "Run df -h on all CORE hosts in parallel"
 "Ping all hosts"
+"Start monitoring PROJECT_CORE"
+"Monitoring status"
+"Stop monitoring all"
+"Command history for web01"
+"Export exec log as JSON"
 "Show execution log"
 "Run memory check on all production hosts"
+"Start monitoring tag:postgres in project DB"
 ```
 
 ---
 
-## Tools Reference (23 tools)
+## Tools Reference (29 tools)
 
 | Category | Tool | Description |
 |---|---|---|
@@ -174,23 +185,29 @@ Add to `~/.continue/config.json`:
 | Host | `add_host` | Add new host to vms.yaml |
 | Host | `remove_host` | Remove host (optionally delete credential) |
 | Host | `update_host` | Update a single host field |
+| Host | `import_hosts` | Bulk-import hosts from CSV or JSON content |
 | Credentials | `save_credential` | Encrypt and store SSH password |
 | Credentials | `check_credential` | Check if credential is stored |
 | Credentials | `delete_credential` | Delete stored credential |
 | Credentials | `audit_credentials` | Show credential status for all hosts |
-| Execution | `run_command` | Run command on single host |
+| Execution | `run_command` | Run command on single host (destructive guard on by default) |
 | Execution | `run_command_multi` | Run command on multiple hosts (sequential/parallel) |
 | Execution | `upload_file` | Upload file via SFTP |
 | Execution | `download_file` | Download file via SFTP |
 | Connectivity | `ping_hosts` | TCP connect to SSH port — check reachability (works even when ICMP is blocked) |
 | Connectivity | `health_check` | Full check: ping → SSH → disk/CPU/mem snapshot |
+| Monitoring | `start_monitoring` | Activate metric collection for a target scope (alias/project/env/zone/tag/all) |
+| Monitoring | `stop_monitoring` | Deactivate monitoring for a scope; use 'all' to stop everything |
+| Monitoring | `monitoring_status` | Show active watch list with latest metrics |
 | Templates | `list_templates` | List command templates |
-| Templates | `expand_template` | Preview template with alias substitution |
+| Templates | `expand_template` | Preview template — substitutes `{{alias}}`, `{{ip}}`, `{{user}}`, `{{env}}`, `{{zone}}`, `{{port}}` |
 | Templates | `add_template` | Add/update command template |
 | Templates | `remove_template` | Remove command template |
 | Log | `read_exec_log` | Show last N execution log entries |
 | Log | `clear_exec_log` | Clear execution log |
 | Log | `save_output` | Save command output to timestamped file |
+| Log | `command_history` | Show last N commands run on a specific host |
+| Log | `export_exec_log` | Export log as JSON or CSV, optionally filtered by alias |
 | AI | `ai_analyze` | SSH into a host, run diagnostics, analyse output with a local Ollama model |
 | AI | `ollama_status` | Check which Ollama models are loaded in VRAM and GPU memory usage |
 
@@ -198,7 +215,7 @@ Add to `~/.continue/config.json`:
 
 ## Target Resolution
 
-`run_command_multi` and `ping_hosts` accept a `target` that resolves in this order:
+`run_command_multi`, `ping_hosts`, `start_monitoring`, and `stop_monitoring` accept a `target` that resolves in this order:
 
 1. **Exact alias** — `web01`
 2. **Project name** — `CORE`
@@ -253,6 +270,39 @@ extra_hosts:
 - All SSH host keys are auto-accepted (AutoAddPolicy) — suitable for internal/VPN networks
 - Host reachability uses **TCP connect to the SSH port** — works on VMs where ICMP (ping) is firewalled
 - `.env` and `data/` are in `.gitignore` — never committed
+
+### Destructive command guard
+
+`run_command` and `run_command_multi` block commands matching dangerous patterns by default:
+
+| Pattern | Examples blocked |
+|---|---|
+| Recursive root delete | `rm -rf /`, `rm -rf /home` |
+| Raw disk write | `dd of=/dev/sda`, `dd of=/dev/nvme0n1` |
+| Filesystem format | `mkfs.ext4 /dev/sda`, `mkfs.xfs /dev/vda` |
+| Shutdown / poweroff | `shutdown -h now`, `halt`, `poweroff` |
+| Reboot | `reboot`, `init 6` |
+| Fork bomb | `:(){ :|: & };:` |
+
+To deliberately run one of these, pass `force=True`:
+```
+Run "reboot" on web01 with force=True
+```
+
+### Per-host concurrency limit
+
+At most **3 concurrent SSH sessions per host** by default (configurable via `MAX_CONCURRENT_PER_HOST` env var). Prevents accidental SSH flooding during large multi-host runs.
+
+### Webhook notifications
+
+Set `WEBHOOK_URL` in `.env` / `docker-compose.yml` to receive HTTP POST alerts:
+- `command_failed` — any non-zero exit code
+- `host_down` — host unreachable during a ping sweep
+
+```ini
+# .env
+WEBHOOK_URL=https://hooks.slack.com/services/...
+```
 
 ---
 
@@ -314,5 +364,6 @@ http://localhost:8765/dashboard
 - Auto-refresh every 30 seconds (toggle)
 - API key input field (if auth is enabled)
 - Metrics cached 30s server-side — parallel SSH collection
+- **On-demand only** — dashboard shows metrics only for hosts you explicitly started monitoring; empty by default
 
-**Workflow:** Use the dashboard for passive monitoring, VS Code Agent mode for AI-driven investigation and fixes — both connect to the same server.
+**Workflow:** Use `start_monitoring(<target>)` in Agent mode to activate a scope, the dashboard populates automatically. Use `stop_monitoring(all)` when done. For always-on infrastructure monitoring use dedicated tools (Prometheus, Grafana Alloy, etc.) — this server is optimised for targeted debugging and remote deployments.
