@@ -388,24 +388,17 @@ Bake `system_prompt.md` directly into your Ollama model so it is always active w
 
 ### Create the Modelfile
 
-```bash
-# In your project root
-cat > Modelfile << 'EOF'
-FROM qwen2.5:7b
-
-SYSTEM """
-You are a remote SSH execution assistant. You manage hosts via vms.yaml
-and connect securely using encrypted credentials.
-
-[Paste the full contents of system_prompt.md here]
-"""
-
-PARAMETER temperature 0.1
-PARAMETER num_ctx 4096
-EOF
-```
+A ready-to-use `Modelfile` is included in the project root. It bakes the full
+`system_prompt.md` (including the Canonical Command Mapping and Multi-Host
+Execution Rules) directly into the model so every response uses the same
+deterministic tool routing and exact canonical commands.
 
 > Use `temperature 0.1` — low temperature is critical for deterministic tool routing and safe command execution.
+
+> **Rebuild after any `system_prompt.md` change:**
+> ```bash
+> ollama create mcp-executor -f Modelfile
+> ```
 
 ### Build and Run the Custom Model
 
