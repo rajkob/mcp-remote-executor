@@ -3,7 +3,7 @@ SHELL := /bin/bash
 .PHONY: help check-imports check-contracts lint test-server refactor-start refactor-check
 
 help: ## List available targets
-	@awk 'BEGIN {FS = ": ## "}; /^[a-zA-Z0-9_.-]+:[[:space:]]+## / {printf "%-16s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+	@awk 'BEGIN {FS = ": ## "}; /^[a-zA-Z0-9_.-]+: ## / {printf "%-16s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
 check-imports: ## Import each project module
 	@python -c "import vms; print('✓ imported vms')"
@@ -33,8 +33,7 @@ test-server: ## Start the stack and hit the SSE endpoint
 
 refactor-start: ## Create a refactor branch and copy the active plan template
 	@mkdir -p .llm
-	@printf "Refactor branch name: "
-	@read -r name; \
+	@read -r -p "Refactor branch name: " name; \
 	if [ -z "$$name" ]; then \
 		echo "Branch name is required."; \
 		exit 1; \
