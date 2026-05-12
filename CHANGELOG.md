@@ -16,7 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   improvising command variants
 - **Multi-Host Execution Rules** in `system_prompt.md` — requires `run_command_multi`
   over loops, documents parallel vs sequential mode
-- Expanded `vms.yaml` template skeleton from 8 to 24 templates covering cpu-detail,
+- Expanded `vms.yaml` template skeleton from 8 to 21 templates covering cpu-detail,
   processes, kernel, health-snap, running-services, connections, syslog, auth-log,
   cron-log, docker-ps, docker-stats, docker-df, largest-files
 - `pyproject.toml` with ruff configuration so `make lint` passes cleanly on a fresh clone
