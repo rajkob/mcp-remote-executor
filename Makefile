@@ -1,7 +1,9 @@
+SHELL := /bin/bash
+
 .PHONY: help check-imports check-contracts lint test-server refactor-start refactor-check
 
 help: ## List available targets
-	@awk 'BEGIN {FS = ": ## "}; /^[a-zA-Z0-9_.-]+: ## / {printf "%-16s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+	@awk 'BEGIN {FS = ": ## "}; /^[a-zA-Z0-9_.-]+:[[:space:]]+## / {printf "%-16s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
 check-imports: ## Import each project module
 	@python -c "import vms; print('✓ imported vms')"
