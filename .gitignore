@@ -17,3 +17,6 @@ build/
 # OS
 .DS_Store
 Thumbs.db
+
+# LLM refactoring working files — plan may contain sensitive context
+.llm/active_plan.md
