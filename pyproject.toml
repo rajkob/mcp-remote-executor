@@ -1,0 +1,11 @@
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+# E702 – semicolon-separated statements in deploy.py (intentional colour-constant packing)
+# F541 – f-string without placeholder in deploy.py (cosmetic print strings)
+# F401 – unused imports in test files (imported for side-effects / future use)
+# F841 – local variable assigned but never used in test helpers
+# E402 – module-level import not at top (test_connectivity.py, acceptable)
+ignore = ["E702", "F541", "F401", "F841", "E402"]
