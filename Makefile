@@ -37,7 +37,12 @@ refactor-start: ## Create a refactor branch and copy the active plan template
 		echo "Branch name is required."; \
 		exit 1; \
 	fi; \
-	git checkout -b "refactor/$$name"; \
+	branch="refactor/$$name"; \
+	if ! git check-ref-format --branch "$$branch" >/dev/null 2>&1; then \
+		echo "Invalid branch name: $$branch"; \
+		exit 1; \
+	fi; \
+	git checkout -b "$$branch"; \
 	cp .llm/refactor_plan.md .llm/active_plan.md; \
 	echo "✓ created .llm/active_plan.md"
 
