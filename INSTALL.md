@@ -4,7 +4,7 @@
 
 - Windows 10/11 or Linux/macOS with **Docker Desktop** / Docker Engine installed
 - VS Code with GitHub Copilot extension (or Claude Desktop / Continue.dev)
-- **Python 3.9+** — only required if using `deploy.py` (not needed for `deploy.sh` / `deploy.ps1`)
+- **Python 3.11+** — only required if using `deploy.py` (not needed for `deploy.sh` / `deploy.ps1`)
 
 ---
 
@@ -68,7 +68,7 @@ chmod +x deploy.sh
 
 ---
 
-## Option C — deploy.py (all platforms, requires Python 3.9+)
+## Option C — deploy.py (all platforms, requires Python 3.11+)
 
 ```bash
 cd mcp-remote-executor
@@ -93,7 +93,7 @@ sudo apt update && sudo apt install -y python3 python3-pip
 brew install python3
 ```
 
-Verify: `python --version` or `python3 --version` — should show 3.9 or higher.
+Verify: `python --version` or `python3 --version` — should show 3.11 or higher.
 
 **deploy.py options:**
 ```bash
@@ -167,7 +167,7 @@ The server exposes **29 MCP tools** once connected. See the [Tools Reference in 
 | 3 | Creates `data/`, generates `.env` with Fernet encryption key |
 | 4 | **API key setup** — asks whether to enable auth, generates and saves key |
 | 5 | Builds Docker image (or pulls from Hub) and starts the container |
-| 6 | Health-checks `http://localhost:8765/sse` and confirms server is up |
+| 6 | Health-checks `http://localhost:8765/health` and confirms server is up |
 
 At the end it prints the full integration guide **with your API key already filled in** and the dashboard URL.
 

@@ -18,12 +18,16 @@ Give AI assistants **SSH access to your remote servers** — run commands, trans
 - **On-demand monitoring** — `start_monitoring`, `stop_monitoring`, `monitoring_status` let you focus on the hosts you care about right now, without polling everything continuously
 - **Execution log panel** — recent SSH command history, filterable by host, live in the dashboard; also exportable as JSON or CSV via `export_exec_log`
 - **Bulk host import** — `import_hosts` accepts CSV or JSON to onboard many hosts at once
-- **Webhook notifications** — set `WEBHOOK_URL` to receive `command_failed` / `host_down` events to Slack, Teams, or any HTTP endpoint
+- **Webhook notifications** — set `WEBHOOK_URL` to receive `command_failed` / `host_down` / `metric_alert` events to Slack, Teams, or any HTTP endpoint
 - **Destructive command guard** — `rm -rf /`, `dd`, `mkfs`, `shutdown` and similar are blocked by default; `force=True` overrides
 - **VPN-friendly** — Docker `network_mode: host` — private subnets reachable out of the box
 - **Encrypted credentials** — Fernet (AES-128-CBC + HMAC-SHA256), never plaintext on disk
 - **No Python on host** — deploy with `deploy.ps1` (Windows), `deploy.sh` (Linux/macOS), or `deploy.py` (cross-platform, supports `--pull` / `--restart` / `--status` / `--reset-key` / `--version`)
 - **SSH connection pool** — transports are reused per host; fewer handshakes, lower latency on repeated commands; pool capped at `MAX_POOL_SIZE` (default 50) with FIFO eviction to prevent socket accumulation
+- **SSH TOFU host key verification** — keys stored in `data/known_hosts` on first connect; mismatch on subsequent connections raises an error — MITM protection out of the box
+- **SSH connection retry** — transient unreachable errors retried automatically (`SSH_RETRY_COUNT` / `SSH_RETRY_DELAY`)
+- **Monitoring threshold alerts** — `metric_alert` webhook when CPU / memory / disk breach `CPU_ALERT_PCT` / `MEM_ALERT_PCT` / `DISK_ALERT_PCT` thresholds (default 90%)
+- **`/health` endpoint** — `GET /health` returns `{"status":"ok"}` without auth; Docker `HEALTHCHECK` enabled
 - **Works with** — VS Code Copilot, Claude Desktop, Continue.dev, any SSE MCP client
 
 ---
@@ -268,7 +272,7 @@ extra_hosts:
 - Credentials are encrypted with **Fernet (AES-128-CBC + HMAC-SHA256)**
 - The `CRED_MASTER_KEY` is the only secret — back it up safely
 - Server binds to `0.0.0.0:8765` — firewall port 8765 to trusted networks only
-- All SSH host keys are auto-accepted (AutoAddPolicy) — suitable for internal/VPN networks
+- SSH host keys are verified using **TOFU (Trust On First Use)** — the key is stored in `data/known_hosts` on first connection and checked on every subsequent connection; a mismatch raises an error before any command is executed
 - Host reachability uses **TCP connect to the SSH port** — works on VMs where ICMP (ping) is firewalled
 - `.env` and `data/` are in `.gitignore` — never committed
 - Host aliases are validated against `^[A-Za-z0-9_.:-]+$` before being written to `vms.yaml`
@@ -304,6 +308,7 @@ The SSH transport pool is capped at **50 connections** by default (`MAX_POOL_SIZ
 Set `WEBHOOK_URL` in `.env` / `docker-compose.yml` to receive HTTP POST alerts:
 - `command_failed` — any non-zero exit code
 - `host_down` — host unreachable during a ping sweep
+- `metric_alert` — CPU / memory / disk threshold breached during monitoring
 
 ```ini
 # .env

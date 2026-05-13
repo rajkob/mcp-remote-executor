@@ -400,12 +400,12 @@ and connect securely using encrypted credentials.
 [Paste the full contents of system_prompt.md here]
 """
 
-PARAMETER temperature 0.1
-PARAMETER num_ctx 4096
+PARAMETER temperature 0
+PARAMETER num_ctx 8192
 EOF
 ```
 
-> Use `temperature 0.1` — low temperature is critical for deterministic tool routing and safe command execution.
+> Use `temperature 0` — zero temperature is critical for deterministic tool routing and safe command execution.
 
 ### Build and Run the Custom Model
 

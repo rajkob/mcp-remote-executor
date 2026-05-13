@@ -10,6 +10,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **SSH TOFU host key verification** — replaced `AutoAddPolicy` with a TOFU policy backed by
+  `data/known_hosts`; new hosts are trusted on first connection, subsequent connections verify
+  the stored key and raise on mismatch to protect against MITM attacks
+- **SSH retry on transient failures** — `ssh_exec` retries `HostUnreachable` up to
+  `SSH_RETRY_COUNT` times (default 2) with `SSH_RETRY_DELAY` seconds between attempts;
+  pool entry evicted between attempts for a fresh reconnect
+- **Monitoring threshold alerts** — `monitor.py` fires `metric_alert` webhook events when
+  CPU, memory, or disk breach configurable thresholds (`CPU_ALERT_PCT`, `MEM_ALERT_PCT`,
+  `DISK_ALERT_PCT` env vars; default 90%)
+- **`/health` JSON endpoint** — `GET /health` returns `{"status":"ok"}` 200 without auth;
+  always handled by `APIKeyMiddleware` regardless of dashboard mode
+- **Docker `HEALTHCHECK`** — Dockerfile now includes a `HEALTHCHECK` directive using `curl`
+  against the new `/health` endpoint
+- **`run_command_multi` timeout override** — new optional `timeout: int | None` parameter
+  threaded through to `ssh_exec_multi` and `ssh_exec`; overrides per-host default
+- **`env:` / `tag:` / `zone:` / `project:` prefix routing** — `vms.resolve_target()` now
+  parses explicit prefixes (`env:production`, `tag:postgres`, `zone:DMZ`, `project:CORE`)
+  before falling through to plain-string resolution
+- **`ai_analyze` template-backed dispatch** — command selection now looks up vms templates
+  first (`disk`, `memory`, `cpu`, `syslog`, `netstat`, `failed-services`, `health-snap`);
+  hardcoded commands used only as fallback — eliminates silent drift between template set
+  and ai_analyze
+- **Expanded vms.yaml skeleton** (deploy scripts) — `deploy.sh` and `deploy.ps1` now write
+  21 templates matching `vms.py` defaults: `disk`, `memory`, `uptime`, `cpu`, `cpu-detail`,
+  `processes`, `who`, `os-version`, `kernel`, `health-snap`, `failed-services`,
+  `running-services`, `netstat`, `connections`, `syslog`, `auth-log`, `cron-log`,
+  `docker-ps`, `docker-stats`, `docker-df`, `largest-files`
+- **`CONTRIBUTING.md`** — development setup, test instructions, PR checklist
+- **`SECURITY.md`** — supported versions, vulnerability reporting contact, design notes
+
+### Changed
+- `APIKeyMiddleware` now reads `MCP_API_KEY` once in `__init__` instead of on every request
+- `_ollama_chat` inference options changed to `temperature: 0, num_ctx: 8192` to match the
+  committed `Modelfile` (was `0.1 / 4096`)
+- `save_output` timestamps are now in UTC (`datetime.now(timezone.utc)`) instead of local
+  wall-clock time
+- README: CI badge added; Python requirement corrected (3.9+ → 3.11+)
+- `CONTRACTS.md`: `ssh_exec_multi` and `run_command_multi` signatures updated with new
+  `timeout` param; `monitor.set_alert_callback` added
+
+### Security
+- Replaced `paramiko.AutoAddPolicy` with `_TOFUPolicy` — prevents silent acceptance of
+  changed host keys (MITM protection) while remaining frictionless for new hosts
+
+---
+
+## [Unreleased — pre-this-batch]
+
+### Added
 - `Modelfile` for Ollama — bakes in system prompt with `temperature 0` and `seed 42`
   for deterministic LLM tool-call behaviour
 - **Canonical Command Mapping** table in `system_prompt.md` — prevents LLM from
