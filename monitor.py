@@ -4,9 +4,11 @@ monitor.py — SSH-based metric collection for the dashboard.
 Collects CPU, memory, disk, uptime and ping reachability per host.
 Results are cached for CACHE_TTL seconds to avoid hammering hosts.
 """
+import os
 import time
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Callable
 
 import ping_tools
 import ssh_tools
@@ -15,8 +17,30 @@ import vms
 CACHE_TTL = 30          # seconds before metrics are re-fetched
 MAX_WORKERS = 10        # parallel SSH connections
 
+# ── Alert thresholds (env-configurable) ──────────────────────────────────────
+CPU_ALERT_PCT  = float(os.getenv("CPU_ALERT_PCT",  "90"))
+MEM_ALERT_PCT  = float(os.getenv("MEM_ALERT_PCT",  "90"))
+DISK_ALERT_PCT = float(os.getenv("DISK_ALERT_PCT", "90"))
+
 _cache: dict = {}       # alias -> {"ts": float, "data": dict}
 _lock = threading.Lock()
+
+# ── Alert callback (set by server.py to avoid circular import) ────────────────
+_alert_callback: Callable[[dict], None] | None = None
+
+
+def set_alert_callback(fn: Callable[[dict], None]) -> None:
+    """Register a function to call when a metric threshold is breached."""
+    global _alert_callback
+    _alert_callback = fn
+
+
+def _fire_alert(payload: dict) -> None:
+    if _alert_callback is not None:
+        try:
+            _alert_callback(payload)
+        except Exception:
+            pass
 
 
 def _parse_cpu(raw: str) -> float | None:
@@ -121,6 +145,31 @@ def _collect_host(host: dict) -> dict:
         result["disk"] = _parse_disk(sections.get("disk", ""))
         result["uptime"] = _parse_uptime(sections.get("uptime", ""))
         result["status"] = "ok"
+
+        # ── Threshold alerts ──────────────────────────────────────────────────
+        if result["cpu_pct"] is not None and result["cpu_pct"] >= CPU_ALERT_PCT:
+            _fire_alert({
+                "event": "metric_alert", "metric": "cpu",
+                "alias": alias, "ip": result["ip"],
+                "value": result["cpu_pct"], "threshold": CPU_ALERT_PCT,
+            })
+        if result["mem"] and result["mem"]["pct"] >= MEM_ALERT_PCT:
+            _fire_alert({
+                "event": "metric_alert", "metric": "memory",
+                "alias": alias, "ip": result["ip"],
+                "value": result["mem"]["pct"], "threshold": MEM_ALERT_PCT,
+            })
+        if result["disk"]:
+            try:
+                disk_pct = float(result["disk"]["pct"].rstrip("%"))
+                if disk_pct >= DISK_ALERT_PCT:
+                    _fire_alert({
+                        "event": "metric_alert", "metric": "disk",
+                        "alias": alias, "ip": result["ip"],
+                        "value": disk_pct, "threshold": DISK_ALERT_PCT,
+                    })
+            except (ValueError, AttributeError):
+                pass
     except Exception as exc:
         result["status"] = "error"
         result["error"] = str(exc)[:120]

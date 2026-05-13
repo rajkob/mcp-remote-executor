@@ -183,6 +183,33 @@ def resolve_target(target: str) -> list[dict]:
     if target.lower() == "all":
         return all_hosts
 
+    # Optional prefixes: 'env:production', 'tag:postgres', 'zone:DMZ', 'project:CORE'
+    lower = target.lower()
+    if lower.startswith("env:"):
+        env_val = target[4:]
+        by_env = [h for h in all_hosts if h.get("env") == env_val]
+        if by_env:
+            return by_env
+        raise HostNotFound(f"No hosts found for env '{env_val}'")
+    if lower.startswith("tag:"):
+        tag_val = target[4:]
+        by_tag = [h for h in all_hosts if tag_val in (h.get("tags") or [])]
+        if by_tag:
+            return by_tag
+        raise HostNotFound(f"No hosts found for tag '{tag_val}'")
+    if lower.startswith("zone:"):
+        zone_val = target[5:]
+        by_zone = [h for h in all_hosts if (h.get("zone") or "").upper() == zone_val.upper()]
+        if by_zone:
+            return by_zone
+        raise HostNotFound(f"No hosts found for zone '{zone_val}'")
+    if lower.startswith("project:"):
+        proj_val = target[8:]
+        by_project = [h for h in all_hosts if h.get("_project") == proj_val]
+        if by_project:
+            return by_project
+        raise HostNotFound(f"No hosts found for project '{proj_val}'")
+
     # Exact alias
     exact = [h for h in all_hosts if h.get("alias") == target]
     if exact:

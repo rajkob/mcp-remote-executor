@@ -1,5 +1,6 @@
 # Remote Executor MCP Server
 
+[![CI](https://github.com/rajkob/mcp-remote-executor/actions/workflows/ci.yml/badge.svg)](https://github.com/rajkob/mcp-remote-executor/actions/workflows/ci.yml)
 [![Docker Pulls](https://img.shields.io/docker/pulls/rajkob/mcp-remote-executor?style=flat-square&logo=docker)](https://hub.docker.com/r/rajkob/mcp-remote-executor)
 [![GitHub Stars](https://img.shields.io/github/stars/rajkob/mcp-remote-executor?style=flat-square&logo=github)](https://github.com/rajkob/mcp-remote-executor)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](LICENSE)
@@ -58,7 +59,7 @@ Remote hosts (private subnet / VPN)
 ### 1. Prerequisites
 
 - Docker Desktop (with WSL2 backend on Windows)
-- Python 3.9+ (local, only for `init.py`)
+- Python 3.11+ (local, only for `init.py`)
 - `cryptography` package: `pip install cryptography`
 
 ### 2. Generate master key and data skeleton

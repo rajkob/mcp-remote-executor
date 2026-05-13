@@ -62,6 +62,8 @@ class DashboardApp:
 
         if path in ("/dashboard", "/dashboard/"):
             await self._serve_html(send)
+        elif path == "/health":
+            await self._send(send, *_json_response({"status": "ok"}))
         elif path == "/api/status":
             if not _auth_ok(scope):
                 await self._send(send, *_json_response({"error": "unauthorized"}, 401))
@@ -109,7 +111,7 @@ class RouterApp:
     Top-level ASGI router — sends dashboard routes to DashboardApp,
     everything else to the wrapped MCP app.
     """
-    DASHBOARD_PATHS = {"/dashboard", "/dashboard/", "/api/status"}
+    DASHBOARD_PATHS = {"/dashboard", "/dashboard/", "/api/status", "/health"}
 
     def __init__(self, mcp_app):
         self.mcp_app = mcp_app

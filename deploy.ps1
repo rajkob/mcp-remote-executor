@@ -144,14 +144,36 @@ defaults:
   timeout: 30
 
 templates:
+  # -- System overview --
   disk:            "df -h"
   memory:          "free -h"
   uptime:          "uptime"
   cpu:             "top -bn1 | grep 'Cpu(s)'"
+  cpu-detail:      "lscpu"
+  processes:       "ps aux --sort=-%cpu | head -20"
   who:             "who"
   os-version:      "cat /etc/os-release"
-  failed-services: "systemctl --failed"
-  netstat:         "ss -tlnp"
+  kernel:          "uname -r"
+  health-snap:     "uptime && free -h && df -h && systemctl --failed"
+
+  # -- Services & ports --
+  failed-services:  "systemctl --failed"
+  running-services: "systemctl list-units --type=service --state=running"
+  netstat:          "ss -tlnp"
+  connections:      "ss -tnp"
+
+  # -- Logs --
+  syslog:          "journalctl -n 100 --no-pager"
+  auth-log:        "journalctl -u ssh -n 50 --no-pager"
+  cron-log:        "journalctl -u cron -n 50 --no-pager"
+
+  # -- Docker --
+  docker-ps:       "docker ps -a"
+  docker-stats:    "docker stats --no-stream"
+  docker-df:       "docker system df"
+
+  # -- Storage --
+  largest-files:   "find / -xdev -type f -printf '%s %p\n' | sort -rn | head -10"
 
 projects: {}
 "@ | Set-Content -Path $vmsFile -Encoding utf8

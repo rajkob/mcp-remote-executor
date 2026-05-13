@@ -67,6 +67,9 @@ def _send_webhook(payload: dict) -> None:
     except Exception as e:
         _logging.warning("Webhook delivery failed (%s): %s", _WEBHOOK_URL, e)
 
+# Register webhook callback for monitoring threshold alerts
+monitor.set_alert_callback(_send_webhook)
+
 # ─── API KEY MIDDLEWARE ───────────────────────────────────────────────────────
 
 class APIKeyMiddleware:
@@ -77,18 +80,23 @@ class APIKeyMiddleware:
     """
     def __init__(self, app):
         self.app = app
+        self._api_key = os.getenv("MCP_API_KEY", "").strip()
 
     async def __call__(self, scope, receive, send):
-        api_key = os.getenv("MCP_API_KEY", "").strip()
+        api_key = self._api_key
 
         # Auth disabled or non-HTTP scope (lifespan etc.) — pass through
         if not api_key or scope["type"] != "http":
             await self.app(scope, receive, send)
             return
 
-        # Always allow health check
+        # Always allow health check — and respond directly
         if scope.get("path", "") == "/health":
-            await self.app(scope, receive, send)
+            body = b'{"status":"ok"}'
+            await send({"type": "http.response.start", "status": 200,
+                        "headers": [(b"content-type", b"application/json"),
+                                    (b"content-length", str(len(body)).encode())]})
+            await send({"type": "http.response.body", "body": body})
             return
 
         # Check X-MCP-Key header
@@ -430,12 +438,14 @@ def run_command_multi(
     command: str,
     mode: Literal["sequential", "parallel"] = "sequential",
     force: bool = False,
+    timeout: int | None = None,
 ) -> str:
     """
     Run a shell command on multiple hosts.
     target: alias | project name | tag | env label | zone label | "all"
     mode: 'sequential' (stream as each completes) | 'parallel' (all at once)
     force: bypass the destructive command guard
+    timeout: per-host command timeout in seconds (overrides host default)
     Auto-logged to exec.log per host.
     """
     # Pre-check destructive guard before touching any host
@@ -453,7 +463,7 @@ def run_command_multi(
         return f"No hosts found for target '{target}'."
 
     aliases = [h["alias"] for h in hosts]
-    results = ssh_tools.ssh_exec_multi(aliases, command, mode=mode, force=force)
+    results = ssh_tools.ssh_exec_multi(aliases, command, mode=mode, force=force, timeout=timeout)
 
     lines = [f"**Ran `{command}` on {len(results)} host(s)** (mode: {mode})\n"]
     ok = failed = 0
@@ -659,14 +669,15 @@ def save_output(content: str, label: str, command: str) -> str:
     output_dir = data_dir / "output"
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    ts = datetime.now().strftime("%Y%m%d-%H%M")
+    now_utc = datetime.now(__import__("datetime").timezone.utc)
+    ts = now_utc.strftime("%Y%m%d-%H%M")
     cmd_brief = re.sub(r"[^\w-]", "-", command.split()[0] if command else "output")[:20]
     filename = f"{label}_{cmd_brief}_{ts}.txt"
     path = output_dir / filename
 
     header = (
         f"# Remote Execution Output\n"
-        f"# Timestamp: {datetime.now().isoformat()}\n"
+        f"# Timestamp: {now_utc.isoformat()}\n"
         f"# Command:   {command}\n"
         f"# Label:     {label}\n"
         f"# {'─' * 40}\n\n"
@@ -744,7 +755,7 @@ def start_monitoring(target: str) -> str:
     Adds matching hosts to the active watch list — the dashboard /api/status and
     monitoring_status() will then show live metrics for those hosts only.
     Monitoring is OFF by default; call this to activate it for a specific scope.
-    Examples: 'web01', 'PROJECT_CORE', 'env:production', 'tag:postgres', 'all'
+    Examples: 'web01', 'PROJECT_CORE', 'production', 'postgres', 'all'
     """
     try:
         hosts = vms.resolve_target(target)
@@ -844,7 +855,7 @@ def _ollama_chat(prompt: str, system: str = "") -> str:
             {"role": "user",   "content": prompt},
         ],
         "stream": False,
-        "options": {"temperature": 0.1, "num_ctx": 4096},
+        "options": {"temperature": 0, "num_ctx": 8192},
     }).encode()
     req = urllib.request.Request(
         f"{_OLLAMA_URL}/api/chat",
@@ -873,20 +884,34 @@ def ai_analyze(alias: str, question: str) -> str:
         )
 
     q = question.lower()
-    if any(w in q for w in ["disk", "space", "storage"]):
-        command = "df -h && du -sh /* 2>/dev/null | sort -rh | head -20"
-    elif any(w in q for w in ["memory", "mem", "ram"]):
-        command = "free -m && ps aux --sort=-%mem | head -15"
-    elif any(w in q for w in ["cpu", "load", "process"]):
-        command = "uptime && ps aux --sort=-%cpu | head -15"
-    elif any(w in q for w in ["log", "error", "fail"]):
-        command = "journalctl -n 100 --no-pager -p err 2>/dev/null || tail -100 /var/log/syslog 2>/dev/null"
-    elif any(w in q for w in ["network", "connection", "port"]):
-        command = "ss -tulnp"
-    elif any(w in q for w in ["service", "systemd", "running"]):
-        command = "systemctl --failed"
-    else:
-        command = "uptime && free -m && df -h && ps aux --sort=-%cpu | head -10"
+
+    # ── Dispatch via vms templates (single source of truth) ───────────────────
+    # Map keyword tuples → template names defined in vms.yaml.
+    # Falls back to a hardcoded composite command if the template is absent.
+    _KEYWORD_TEMPLATE_MAP: list[tuple[tuple, str, str]] = [
+        (("disk", "space", "storage"),  "disk",
+         "df -h && du -sh /* 2>/dev/null | sort -rh | head -20"),
+        (("memory", "mem", "ram"),       "memory",
+         "free -m && ps aux --sort=-%mem | head -15"),
+        (("cpu", "load", "process"),     "cpu",
+         "uptime && ps aux --sort=-%cpu | head -15"),
+        (("log", "error", "fail"),       "syslog",
+         "journalctl -n 100 --no-pager -p err 2>/dev/null || tail -100 /var/log/syslog 2>/dev/null"),
+        (("network", "connection", "port"), "netstat",
+         "ss -tulnp"),
+        (("service", "systemd", "running"), "failed-services",
+         "systemctl --failed"),
+    ]
+
+    templates = vms.load_templates()
+    command = None
+    for keywords, template_name, fallback_cmd in _KEYWORD_TEMPLATE_MAP:
+        if any(w in q for w in keywords):
+            command = templates.get(template_name, fallback_cmd)
+            break
+    if command is None:
+        command = templates.get("health-snap",
+                                "uptime && free -m && df -h && ps aux --sort=-%cpu | head -10")
 
     try:
         r = ssh_tools.ssh_exec(alias, command)

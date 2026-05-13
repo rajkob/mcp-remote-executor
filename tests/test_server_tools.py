@@ -431,7 +431,7 @@ class TestRunCommandDestructiveGuard(unittest.TestCase):
         ]
         with patch("server.ssh_tools.ssh_exec_multi", return_value=multi_results) as mock_multi:
             result = server.run_command_multi("all", "reboot", force=True)
-        mock_multi.assert_called_once_with(["web01"], "reboot", mode="sequential", force=True)
+        mock_multi.assert_called_once_with(["web01"], "reboot", mode="sequential", force=True, timeout=None)
         self.assertNotIn("🚫", result)
 
     def test_multi_safe_command_not_blocked(self):

@@ -17,6 +17,10 @@ import paramiko
 import credentials
 import vms
 
+# ── Retry configuration ───────────────────────────────────────────────────────
+_SSH_RETRY_COUNT = int(os.getenv("SSH_RETRY_COUNT", "2"))   # retries after first attempt
+_SSH_RETRY_DELAY = float(os.getenv("SSH_RETRY_DELAY", "2")) # seconds between retries
+
 # ── Connection pool ───────────────────────────────────────────────────────────
 # Keeps one reusable SSHClient per (ip, port, user).
 # Entries are evicted automatically when the underlying transport closes.
@@ -87,6 +91,53 @@ def _get_host_semaphore(host: dict) -> threading.Semaphore:
         return _host_semaphores[key]
 
 
+# ── TOFU (Trust On First Use) host key policy ─────────────────────────────────
+
+def _known_hosts_path() -> Path:
+    return Path(os.getenv("DATA_DIR", "/app/data")) / "known_hosts"
+
+
+class _TOFUPolicy(paramiko.MissingHostKeyPolicy):
+    """
+    Trust-On-First-Use SSH host key policy backed by a persistent known_hosts file.
+
+    - New host: accept its key, append to DATA_DIR/known_hosts.
+    - Known host: verify key matches stored entry; raise if mismatch.
+    """
+
+    def missing_host_key(self, client, hostname, key):
+        path = _known_hosts_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        keys_file = paramiko.HostKeys()
+        if path.exists():
+            try:
+                keys_file.load(str(path))
+            except Exception:
+                pass  # corrupted file — treat as empty
+
+        # Hostname may include port as [host]:port — use as-is for HostKeys lookup
+        known = keys_file.lookup(hostname)
+        key_type = key.get_name()
+
+        if known:
+            stored_key = known.get(key_type)
+            if stored_key is not None:
+                if stored_key.asbytes() != key.asbytes():
+                    raise paramiko.SSHException(
+                        f"HOST KEY MISMATCH for {hostname!r} — possible MITM attack! "
+                        "Remove the stale entry from data/known_hosts to re-trust."
+                    )
+                return  # key matches ✓
+
+        # First time seeing this host — add to known_hosts (TOFU)
+        keys_file.add(hostname, key_type, key)
+        try:
+            keys_file.save(str(path))
+        except OSError:
+            pass  # non-fatal — next connection will re-add
+
+
 class CredentialNotFound(Exception):
     pass
 
@@ -151,7 +202,14 @@ def _connect(host: dict, use_pool: bool = True) -> paramiko.SSHClient:
     timeout = host.get("timeout") or 30
 
     client = paramiko.SSHClient()
-    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    client.set_missing_host_key_policy(_TOFUPolicy())
+    # Load previously persisted known_hosts so the TOFU policy can verify them
+    kh = _known_hosts_path()
+    if kh.exists():
+        try:
+            client.load_host_keys(str(kh))
+        except Exception:
+            pass  # corrupted file — TOFU policy will handle it
 
     try:
         if auth == "keyFile" and host.get("keyFile"):
@@ -216,7 +274,20 @@ def ssh_exec(alias: str, command: str, timeout: int | None = None,
     # ── Per-host rate limit ───────────────────────────────────────────────────
     sem = _get_host_semaphore(host)
     with sem:
-        client = _connect(host)
+        last_exc: Exception = HostUnreachable("unreachable")
+        for attempt in range(1 + _SSH_RETRY_COUNT):
+            if attempt > 0:
+                time.sleep(_SSH_RETRY_DELAY)
+            try:
+                client = _connect(host)
+                break
+            except HostUnreachable as e:
+                last_exc = e
+                # Evict pool entry so the next attempt opens a fresh connection
+                with _pool_lock:
+                    _pool.pop(_pool_key(host), None)
+                if attempt == _SSH_RETRY_COUNT:
+                    raise last_exc
         try:
             _, stdout_ch, stderr_ch = client.exec_command(command)
             with ThreadPoolExecutor(max_workers=1) as _ex:
@@ -261,11 +332,12 @@ def ssh_exec(alias: str, command: str, timeout: int | None = None,
 
 
 def ssh_exec_multi(aliases: list[str], command: str, mode: str = "sequential",
-                   force: bool = False) -> list[dict]:
+                   force: bool = False, timeout: int | None = None) -> list[dict]:
     """
     Run command on multiple hosts.
     mode: 'sequential' | 'parallel'
     force: bypass the destructive command guard
+    timeout: per-host command timeout in seconds (overrides host default)
     Returns list of result dicts. Failed hosts include an 'error' key.
     """
     results = []
@@ -273,7 +345,7 @@ def ssh_exec_multi(aliases: list[str], command: str, mode: str = "sequential",
     if mode == "parallel":
         with ThreadPoolExecutor(max_workers=min(len(aliases), 20)) as pool:
             futures = {
-                pool.submit(ssh_exec, alias, command, force=force): alias
+                pool.submit(ssh_exec, alias, command, timeout, force=force): alias
                 for alias in aliases
             }
             for future in as_completed(futures):
@@ -285,7 +357,7 @@ def ssh_exec_multi(aliases: list[str], command: str, mode: str = "sequential",
     else:
         for alias in aliases:
             try:
-                results.append(ssh_exec(alias, command, force=force))
+                results.append(ssh_exec(alias, command, timeout, force=force))
             except Exception as e:
                 results.append({"alias": alias, "error": str(e), "exit_code": -1})
 
