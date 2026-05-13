@@ -23,7 +23,7 @@ import os
 import re
 import hmac
 import urllib.request
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
@@ -669,7 +669,7 @@ def save_output(content: str, label: str, command: str) -> str:
     output_dir = data_dir / "output"
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    now_utc = datetime.now(__import__("datetime").timezone.utc)
+    now_utc = datetime.now(timezone.utc)
     ts = now_utc.strftime("%Y%m%d-%H%M")
     cmd_brief = re.sub(r"[^\w-]", "-", command.split()[0] if command else "output")[:20]
     filename = f"{label}_{cmd_brief}_{ts}.txt"

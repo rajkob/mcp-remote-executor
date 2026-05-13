@@ -173,7 +173,7 @@ templates:
   docker-df:       "docker system df"
 
   # -- Storage --
-  largest-files:   "find / -xdev -type f -printf '%s %p\n' | sort -rn | head -10"
+  largest-files:   'find / -xdev -type f -printf "%s %p\n" | sort -rn | head -10'
 
 projects: {}
 "@ | Set-Content -Path $vmsFile -Encoding utf8

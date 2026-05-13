@@ -147,7 +147,7 @@ Read APIs parse those lines into:
 
 - `close_all_connections() -> int`
 - `ssh_exec(alias: str, command: str, timeout: int | None = None, _log: bool = True, force: bool = False) -> dict`
-- `ssh_exec_multi(aliases: list[str], command: str, mode: str = "sequential", force: bool = False) -> list[dict]`
+- `ssh_exec_multi(aliases: list[str], command: str, mode: str = "sequential", force: bool = False, timeout: int | None = None) -> list[dict]`
 - `sftp_upload(alias: str, local_path: str, remote_path: str) -> dict`
 - `sftp_download(alias: str, remote_path: str, local_path: str) -> dict`
 
@@ -160,6 +160,7 @@ Read APIs parse those lines into:
 
 ### `monitor.py`
 
+- `set_alert_callback(fn: Callable[[dict], None]) -> None`
 - `get_all_metrics(force: bool = False) -> list[dict]`
 - `watch_add(aliases: list) -> None`
 - `watch_remove(aliases: list) -> None`
@@ -187,7 +188,7 @@ This module exposes no public top-level functions. Its public callable surface i
 - `delete_credential(alias: str) -> str`
 - `audit_credentials() -> str`
 - `run_command(alias: str, command: str, force: bool = False) -> str`
-- `run_command_multi(target: str, command: str, mode: Literal["sequential", "parallel"] = "sequential", force: bool = False) -> str`
+- `run_command_multi(target: str, command: str, mode: Literal["sequential", "parallel"] = "sequential", force: bool = False, timeout: int | None = None) -> str`
 - `upload_file(alias: str, local_path: str, remote_path: str) -> str`
 - `download_file(alias: str, remote_path: str, local_path: str) -> str`
 - `ping_hosts(target: str = "all") -> str`

@@ -161,14 +161,15 @@ def _collect_host(host: dict) -> dict:
             })
         if result["disk"]:
             try:
-                disk_pct = float(result["disk"]["pct"].rstrip("%"))
+                pct_raw = result["disk"]["pct"]
+                disk_pct = float(str(pct_raw).rstrip("%"))
                 if disk_pct >= DISK_ALERT_PCT:
                     _fire_alert({
                         "event": "metric_alert", "metric": "disk",
                         "alias": alias, "ip": result["ip"],
                         "value": disk_pct, "threshold": DISK_ALERT_PCT,
                     })
-            except (ValueError, AttributeError):
+            except (ValueError, TypeError, AttributeError):
                 pass
     except Exception as exc:
         result["status"] = "error"
